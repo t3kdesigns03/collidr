@@ -11,7 +11,8 @@ collidr/
 ├── public/
 │   └── index.html        ← the entire app (deployed)
 ├── tests/
-│   └── acceptance.mjs    ← physics + state-machine checks, run with Node
+│   ├── acceptance.mjs    ← physics + state-machine checks, run with Node
+│   └── exotica.mjs       ← what-if black hole + wormhole checks
 ├── netlify.toml          ← publish = "public", security headers, no build
 ├── package.json          ← npm test / npm start (no dependencies)
 ├── .gitignore
@@ -31,7 +32,7 @@ python3 -m http.server 8080 -d public
 ## Verify the physics
 
 ```bash
-npm test                       # node tests/acceptance.mjs
+npm test                       # node tests/acceptance.mjs && node tests/exotica.mjs
 ```
 
 The test extracts the `PHYSICS` and `SIM` modules straight out of `index.html`, so it checks the
@@ -74,6 +75,32 @@ npx netlify-cli deploy --prod --dir=public
 | Sim speed | 1–3600× | Machine time (injection, ramp, squeeze, burn-off). |
 
 Keyboard: `I` inject, `R` ramp, `S` squeeze, `C` collide, `D` dump.
+
+## What-if mode: micro black holes (speculative, ruled out)
+
+**What-if: TeV-scale gravity** (next to *Load LHC design values*) switches on a model in which gravity
+becomes strong at M_D = 1 TeV in n = 6 large extra dimensions (ADD). ATLAS and CMS searched for exactly
+this and found nothing, so the page labels it as excluded everywhere it appears.
+
+- Partons colliding above M_min = 5 TeV form a black hole with `σ̂ = π r_s²`,
+  `r_s = [8Γ((n+3)/2)/(n+2) · M/M_D]^{1/(n+1)} / (√π M_D)` (Dimopoulos–Landsberg), folded with toy
+  proton PDFs (u_v + d_v + g). Result: σ_BH = 0 below √s = 5 TeV (2.5 TeV per beam), 0.027 pb at 7 TeV,
+  124 pb at 14 TeV.
+- So the existing sliders drive it: **beam energy** decides whether black holes are possible and how
+  often (very steeply), **luminosity** (intensity, bunches, β*, crossing angle) multiplies the rate.
+  At design values that is about 1.2 black holes per second at IP1.
+- Count: `N = σ_BH ∫L dt` at IP1 while in stable beams.
+- Each one has `T_H = (n+1)/(4π r_s)` ≈ 0.5 TeV, lifetime `τ ≈ (ħ/M_D)(M/M_D)^{(n+3)/(n+1)}` ≈ 10⁻²⁷ s,
+  and decays democratically into about `M/(2T_H)` quanta (jets, e, μ, γ, neutrinos as MET), drawn in the
+  event display and the ring hologram.
+- Only one is drawn at a time (formation, lensed accretion disk, Hawking evaporation burst), slowed down
+  about 10²⁷×; the rest are counted.
+
+## Easter egg: wormhole (fiction)
+
+Type the Konami code (↑ ↑ ↓ ↓ ← → ← → B A), or tap the centre of the ring five times quickly on a phone,
+to open a wormhole in the ring floor for 12 seconds. It is labelled as fiction: holding a traversable
+wormhole open needs negative energy, which no known physics provides.
 
 ## Physics
 

@@ -171,6 +171,13 @@ input[type=range]::-moz-range-thumb{width:13px;height:13px;border-radius:50%;bac
 .ghost:hover{color:var(--ink);border-color:var(--ice)}
 .kbd{margin-left:auto;align-self:center;font-size:12px;color:var(--ink-3)}
 .kbd kbd{font-family:var(--mono);font-size:11px;padding:1px 5px;border:1px solid var(--line-2);border-radius:4px;color:var(--ink-2)}
+.ghost.whatif[aria-pressed="true"]{color:#ffd8ad;border-color:rgba(255,150,70,.75);box-shadow:0 0 16px rgba(255,130,50,.28)}
+.whatif-note{margin:10px 2px 0;font-family:var(--mono);font-size:11.5px;line-height:1.55;color:var(--ink-3)}
+.whatif-note b{color:#ffcf9a;font-weight:500}
+.banner[data-kind="bh"]{border-color:rgba(255,150,70,.7);box-shadow:0 0 40px rgba(255,120,40,.28)}
+.banner[data-kind="bh"] b{color:#ffb36b}
+.banner[data-kind="wh"]{border-color:rgba(190,120,255,.75);box-shadow:0 0 44px rgba(160,90,255,.35)}
+.banner[data-kind="wh"] b{color:#d6a8ff}
 
 /* Readouts */
 .readout{padding-bottom:12px}
@@ -274,8 +281,10 @@ footer{margin-top:14px;color:var(--ink-3);font-size:12px;text-align:center}
         <div class="sliders" id="sliders"></div>
         <div class="presets">
           <button class="ghost" id="presetNominal">Load LHC design values</button>
+          <button class="ghost whatif" id="whatIfBH" aria-pressed="false" title="Speculative physics that LHC data has ruled out">What-if: TeV-scale gravity</button>
           <span class="kbd">Keys <kbd>I</kbd> <kbd>R</kbd> <kbd>S</kbd> <kbd>C</kbd> <kbd>D</kbd></span>
         </div>
+        <p class="whatif-note" id="bhNote" aria-live="polite" hidden></p>
       </section>
     </div>
 
@@ -360,6 +369,13 @@ const Physics = (() => {
     RETURN_YOKE_T: -1.8,           // return-yoke field seen by muons
     DNDETA_13TEV: 6.46,            // charged multiplicity dN/dη at η≈0, 13 TeV
     DNDETA_EXP: 0.103,             // dN/dη ∝ s^0.103
+    // What-if: TeV-scale gravity (ADD large extra dimensions). Excluded by ATLAS/CMS; display mode only.
+    BH_MD_GEV: 1000,               // fundamental (4+n)-dimensional Planck scale M_D
+    BH_N_EXTRA: 6,                 // number of extra dimensions n
+    BH_MMIN_GEV: 5000,             // minimum black-hole mass (semiclassical threshold, 5 M_D)
+    GEV2_TO_PB: 3.8938e8,          // (ħc)²: 1 GeV⁻² = 0.38938 mb
+    HBAR_GEV_S: 6.582119569e-25,
+    HBARC_GEV_M: 1.973269804e-16,
   });
 
   /** p = √(E² − m²) */
@@ -449,7 +465,62 @@ const Physics = (() => {
     return slots;
   }
 
+  /* ---- What-if: micro black holes from TeV-scale gravity (Dimopoulos–Landsberg / Giddings–Thomas) ---- */
+  function lgamma(z) {
+    const c = [0.99999999999980993, 676.5203681218851, -1259.1392167224028, 771.32342877765313, -176.61502916214059,
+      12.507343278686905, -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7];
+    if (z < 0.5) return Math.log(Math.PI / Math.sin(Math.PI * z)) - lgamma(1 - z);
+    z -= 1; let x = c[0]; for (let i = 1; i < 9; i++) x += c[i] / (z + i);
+    const t = z + 7.5; return 0.5 * Math.log(2 * Math.PI) + (z + 0.5) * Math.log(t) - t + Math.log(x);
+  }
+  /** Schwarzschild radius in 4+n dimensions: r_s = 1/(√π M_D) · [ (M/M_D) · 8Γ((n+3)/2)/(n+2) ]^{1/(n+1)}  (GeV⁻¹) */
+  const bhRadius_invGeV = (M, MD = K.BH_MD_GEV, n = K.BH_N_EXTRA) =>
+    1 / (Math.sqrt(Math.PI) * MD) * Math.pow(M / MD * 8 * Math.exp(lgamma((n + 3) / 2)) / (n + 2), 1 / (n + 1));
+  /** Hawking temperature T_H = (n+1)/(4π r_s) */
+  const bhHawkingT_GeV = (M, MD = K.BH_MD_GEV, n = K.BH_N_EXTRA) => (n + 1) / (4 * Math.PI * bhRadius_invGeV(M, MD, n));
+  /** Lifetime τ ≈ (ħ/M_D) (M/M_D)^{(n+3)/(n+1)} */
+  const bhLifetime_s = (M, MD = K.BH_MD_GEV, n = K.BH_N_EXTRA) => K.HBAR_GEV_S / MD * Math.pow(M / MD, (n + 3) / (n + 1));
+  /** Mean number of primary Hawking quanta ⟨N⟩ ≈ M / (2 T_H) */
+  const bhMultiplicity = (M, MD, n) => M / (2 * bhHawkingT_GeV(M, MD, n));
+  /** Toy proton PDFs at TeV scales, summed over partons (u_v + d_v + g); sea is negligible at the x this needs. */
+  const partonSum = x => (2.33 * Math.sqrt(x) * Math.pow(1 - x, 3.5) + 1.29 * Math.sqrt(x) * Math.pow(1 - x, 4.5)
+    + 2.4 * Math.pow(x, -0.1) * Math.pow(1 - x, 6)) / x;
+  /** Parton luminosity dL/dτ = ∫_τ^1 dx/x F(x) F(τ/x)  (gravity couples to every parton pair) */
+  function partonLumi(tau, steps = 120) {
+    const a = Math.log(tau); let s = 0;
+    for (let i = 0; i < steps; i++) { const x = Math.exp(a * (1 - (i + 0.5) / steps)); s += partonSum(x) * partonSum(tau / x); }
+    return s * (-a) / steps;
+  }
+  /** σ(pp → BH) = ∫_{M_min²/s}^1 dτ dL/dτ · π r_s²(√(τs)), in pb. Cached with an inverse-CDF table for mass sampling. */
+  const bhCache = new Map();
+  function bhTable(sqrtS) {
+    const key = Math.round(sqrtS * 1000);
+    if (bhCache.has(key)) return bhCache.get(key);
+    const s = (sqrtS * 1000) ** 2, t0 = K.BH_MMIN_GEV ** 2 / s;
+    let tab = { sigma: 0, M: [], cdf: [] };
+    if (t0 < 1) {
+      const N = 120, a = Math.log(t0); let acc = 0; const M = [], cdf = [];
+      for (let i = 0; i < N; i++) {
+        const t = Math.exp(a * (1 - (i + 0.5) / N)), r = bhRadius_invGeV(Math.sqrt(t * s));
+        acc += t * partonLumi(t) * Math.PI * r * r * (-a) / N;
+        M.push(Math.sqrt(t * s)); cdf.push(acc);
+      }
+      tab = { sigma: acc * K.GEV2_TO_PB, M, cdf: cdf.map(c => c / acc) };
+    }
+    if (bhCache.size > 400) bhCache.clear();
+    bhCache.set(key, tab);
+    return tab;
+  }
+  const bhSigma_pb = sqrtS => bhTable(sqrtS).sigma;
+  /** Black-hole mass drawn from dσ/dM by inverse CDF; u ∈ [0,1) */
+  function bhSampleMass_GeV(sqrtS, u) {
+    const t = bhTable(sqrtS); if (!t.sigma) return 0;
+    const i = t.cdf.findIndex(c => c >= u);
+    return t.M[i < 0 ? t.M.length - 1 : i];
+  }
+
   return Object.freeze({
+    bhRadius_invGeV, bhHawkingT_GeV, bhLifetime_s, bhMultiplicity, partonLumi, bhSigma_pb, bhSampleMass_GeV,
     K, momentum, energyFromMomentum, requiredField, maxEnergyForField, gamma, sqrtS_TeV,
     sigmaInel_mb, sigmaTot_mb, luminosity, beamCurrent, srLossPerTurn_keV, srPower_W,
     storedEnergy_J, eventRate, pileup, burnoffLifetime_s, combinedLifetime_s, protonLossRate,
@@ -830,6 +901,53 @@ function layer(W, H, dpr) {
 }
 
 /* =====================================================================
+   EXOTICA: what-if TeV-gravity black holes + the wormhole easter egg. No DOM.
+   Counts follow N = σ_BH ∫L dt at IP1. Visuals are shown one at a time, slowed ~10²⁷×.
+   ===================================================================== */
+/* ===== EXOTICA-BEGIN ===== */
+const Exotica = (() => {
+  const P = Physics, K = Physics.K;
+  const BH_VIS_S = 4.4, BH_EVAP_AT_S = 3.3, WH_VIS_S = 12, COOLDOWN_S = 1.2;
+  const st = { on: false, expected: 0, formed: 0, pending: 0, lastSim: null, visual: null, cooldown: 0 };
+  const setOn = v => { st.on = !!v; };
+  const rate = d => (d.colliding ? P.bhSigma_pb(d.sqrtS) * 1e-36 * d.L : 0);  // black holes per second at IP1
+  function makeBH(M) {
+    return { kind: 'bh', t: 0, dur: BH_VIS_S, evapAt: BH_EVAP_AT_S, evaporated: false, M,
+      TH: P.bhHawkingT_GeV(M), life: P.bhLifetime_s(M), nQ: P.bhMultiplicity(M), rs_m: P.bhRadius_invGeV(M) * K.HBARC_GEV_M };
+  }
+  function update(dtReal, d, rand = Math.random) {
+    const out = [];
+    const dSim = st.lastSim === null ? 0 : Math.max(0, d.simTime - st.lastSim);
+    st.lastSim = d.simTime;
+    if (st.on && d.colliding) {
+      st.expected += rate(d) * dSim;
+      const k = Math.floor(st.expected) - st.formed;
+      if (k > 0) { st.formed += k; st.pending += k; out.push({ type: 'bhFormed', n: k, total: st.formed }); }
+    }
+    st.cooldown = Math.max(0, st.cooldown - dtReal);
+    const v = st.visual;
+    if (v) {
+      v.t += dtReal;
+      if (v.kind === 'bh' && !v.evaporated && v.t >= v.evapAt) { v.evaporated = true; out.push({ type: 'bhEvaporate', bh: v }); }
+      if (v.t >= v.dur) { st.visual = null; st.cooldown = COOLDOWN_S; out.push({ type: v.kind === 'bh' ? 'bhGone' : 'whClosed' }); }
+    } else if (st.on && st.pending > 0 && st.cooldown <= 0 && d.colliding) {
+      st.pending = 0;   // one on screen at a time; the rest are counted, not drawn
+      const M = P.bhSampleMass_GeV(d.sqrtS, rand());
+      if (M > 0) { st.visual = makeBH(M); out.push({ type: 'bhShow', bh: st.visual }); }
+    }
+    return out;
+  }
+  function openWormhole() {
+    if (st.visual && st.visual.kind === 'wh') return false;
+    st.visual = { kind: 'wh', t: 0, dur: WH_VIS_S, seed: Math.random() };
+    return true;
+  }
+  const visual = () => st.visual;
+  return { st, setOn, rate, update, openWormhole, visual, BH_VIS_S, BH_EVAP_AT_S, WH_VIS_S };
+})();
+/* ===== EXOTICA-END ===== */
+
+/* =====================================================================
    RENDER: RING VIEW
    ===================================================================== */
 const RingView = (() => {
@@ -1060,40 +1178,50 @@ const RingView = (() => {
   }
 
   /* IP1 event hologram: the event display's latest tracks, projected into the ring plane at the centre.
-     Same events, same radial mapping as the side panel; display only. */
+     Same events as the side panel; display only. A what-if black hole bends them inward. */
+  const holoCentre = () => ({ x: G.cx, y: G.cy - G.R * 0.04 });
+  const bhWarp = v => smooth(0.4, 1.3, v.t) * (1 - smooth(v.evapAt, v.evapAt + 0.35, v.t));
+  const whOpen = v => smooth(0, 1.4, v.t) * (1 - smooth(v.dur - 1.1, v.dur - 0.15, v.t));
   function drawHologram(c, holo, d) {
-    if (!holo || !holo.events.length) return;
-    const list = holo.events, now = performance.now() / 1000;
+    if (!holo) return;
+    const list = holo.events, bhE = holo.bh, now = performance.now() / 1000;
+    if (!list.length && !bhE) return;
+    const vis = Exotica.visual();
+    const lAge = list.length ? now - list[list.length - 1].born : Infinity;
+    const whK = vis && vis.kind === 'wh' ? 1 - whOpen(vis) : 1;
+    const master = (d.colliding ? 1 : Math.max(0, 1 - lAge / 2.5)) * whK;
+    const bhA = bhE ? Math.min(1, 1.25 * (1 - (now - bhE.born) / 4.5)) * whK : 0;
+    if (master <= 0 && bhA <= 0) return;
     // Own radial scale: the tracker (where the curling tracks live) gets 62% of the radius here.
     const mapR = r => r <= 1.1 ? r / 1.1 * 0.62 : r <= 3.0 ? 0.62 + (r - 1.1) / 1.9 * 0.2 : 0.82 + Math.min(r - 3.0, 4.4) / 4.4 * 0.18;
-    const lAge = now - list[list.length - 1].born;
-    const master = d.colliding ? 1 : Math.max(0, 1 - lAge / 2.5);
-    if (master <= 0) return;
-    const HR = G.R * (G.compact ? 0.62 : 0.68), ty = G.tilt;
-    const cx = G.cx, cy = G.cy - G.R * 0.04;
-    const pt = (x, y) => { const r = Math.hypot(x, y); if (r === 0) return [cx, cy]; const k = mapR(r) * HR / r; return [cx + x * k, cy - y * k * ty]; };
+    const HR = G.R * (G.compact ? 0.62 : 0.68), ty = G.tilt, { x: cx, y: cy } = holoCentre();
+    const warp = vis && vis.kind === 'bh' ? bhWarp(vis) : 0;
+    const pt = (x, y) => {
+      const r = Math.hypot(x, y); if (r === 0) return [cx, cy];
+      let f = mapR(r), ph = Math.atan2(y, x);
+      if (warp > 0) { f = Math.pow(f, 1 + 1.1 * warp); ph += warp * 2.2 * (1 - f) * (1 - f); }
+      return [cx + Math.cos(ph) * f * HR, cy - Math.sin(ph) * f * HR * ty];
+    };
     c.save(); c.globalCompositeOperation = 'lighter';
-    // Link from the IP1 detector to the projection
-    const ip = proj(POINT(1));
-    c.globalAlpha = 0.24 * master; c.strokeStyle = '#57ff9a'; c.lineWidth = 1; c.setLineDash([3, 5]);
-    c.beginPath(); c.moveTo(ip.x, ip.y - G.R * 0.05); c.lineTo(cx, cy); c.stroke(); c.setLineDash([]);
-    // Soft projection field, flattened to the ring plane
-    c.save(); c.translate(cx, cy); c.scale(1, ty);
-    const fg = c.createRadialGradient(0, 0, 0, 0, 0, HR);
-    fg.addColorStop(0, 'rgba(87,255,154,0.10)'); fg.addColorStop(0.55, 'rgba(70,140,255,0.05)'); fg.addColorStop(1, 'rgba(70,140,255,0)');
-    c.globalAlpha = master; c.fillStyle = fg; c.beginPath(); c.arc(0, 0, HR, 0, TAU); c.fill();
-    c.restore();
-    // Detector layer outlines: tracker, ECAL, HCAL, solenoid, muon system
-    c.strokeStyle = '#8cb4ff'; c.lineWidth = 1;
-    for (const [r, a] of [[1.1, 0.14], [1.29, 0.08], [1.8, 0.08], [3.0, 0.16], [7.4, 0.1]]) {
-      const rr = mapR(r) * HR; c.globalAlpha = a * master;
-      c.beginPath(); c.ellipse(cx, cy, rr, rr * ty, 0, 0, TAU); c.stroke();
+    if (master > 0) {
+      // Link from the IP1 detector to the projection
+      const ip = proj(POINT(1));
+      c.globalAlpha = 0.24 * master; c.strokeStyle = '#57ff9a'; c.lineWidth = 1; c.setLineDash([3, 5]);
+      c.beginPath(); c.moveTo(ip.x, ip.y - G.R * 0.05); c.lineTo(cx, cy); c.stroke(); c.setLineDash([]);
+      // Soft projection field, flattened to the ring plane
+      c.save(); c.translate(cx, cy); c.scale(1, ty);
+      const fg = c.createRadialGradient(0, 0, 0, 0, 0, HR);
+      fg.addColorStop(0, 'rgba(87,255,154,0.10)'); fg.addColorStop(0.55, 'rgba(70,140,255,0.05)'); fg.addColorStop(1, 'rgba(70,140,255,0)');
+      c.globalAlpha = master; c.fillStyle = fg; c.beginPath(); c.arc(0, 0, HR, 0, TAU); c.fill();
+      c.restore();
+      // Detector layer outlines: tracker, ECAL, HCAL, solenoid, muon system
+      c.strokeStyle = '#8cb4ff'; c.lineWidth = 1;
+      for (const [r, a] of [[1.1, 0.14], [1.29, 0.08], [1.8, 0.08], [3.0, 0.16], [7.4, 0.1]]) {
+        const rr = mapR(r) * HR; c.globalAlpha = a * master;
+        c.beginPath(); c.ellipse(cx, cy, rr, rr * ty, 0, 0, TAU); c.stroke();
+      }
     }
-    list.forEach((ev, idx) => {
-      const latest = idx === list.length - 1, age = now - ev.born;
-      const a = master * (latest ? Math.max(0.6, 1 - age / 1.6) : Math.max(0, 0.45 - age / 1.2));
-      if (a <= 0.01) return;
-      const grow = prefersReducedMotion ? 1 : Math.min(1, age / 0.35);
+    const drawEv = (ev, a, grow) => {
       for (const t of ev.towers) {
         c.globalAlpha = 1; c.fillStyle = `rgba(${t.color},${t.a * a * 0.8 * grow * grow})`;
         c.beginPath();
@@ -1104,22 +1232,204 @@ const RingView = (() => {
       for (const t of ev.tracks) {
         const n = Math.min(t.pts.length, Math.max(2, Math.ceil(t.pts.length * grow)));
         c.beginPath();
-        for (let i = 0; i < n; i++) { const [x, y] = pt(t.pts[i][0], t.pts[i][1]); i ? c.lineTo(x, y) : c.moveTo(x, y); }
+        if (t.dash) {   // straight neutral lines (photons, MET): interpolate so the warp can bend them
+          const [x1, y1] = t.pts[t.pts.length - 1], m = 24;
+          for (let i = 0; i <= m * grow; i++) { const [x, y] = pt(x1 * i / m, y1 * i / m); i ? c.lineTo(x, y) : c.moveTo(x, y); }
+          c.setLineDash(t.dash);
+        } else for (let i = 0; i < n; i++) { const [x, y] = pt(t.pts[i][0], t.pts[i][1]); i ? c.lineTo(x, y) : c.moveTo(x, y); }
         c.strokeStyle = t.color; c.shadowBlur = 0;
         c.globalAlpha = 0.22 * t.a * a; c.lineWidth = t.w * 4.5; c.stroke();             // halo
         if (t.glow) { c.shadowColor = t.color; c.shadowBlur = 12; }
         c.globalAlpha = Math.min(1, 1.35 * t.a * a); c.lineWidth = t.w * (G.compact ? 1.1 : 1.4); c.stroke();
+        c.setLineDash([]);
       }
       c.shadowBlur = 0;
-      if (latest && age < 0.4) {
+    };
+    list.forEach((ev, idx) => {
+      const latest = idx === list.length - 1, age = now - ev.born;
+      const a = master * (latest ? Math.max(0.6, 1 - age / 1.6) : Math.max(0, 0.45 - age / 1.2));
+      if (a <= 0.01) return;
+      drawEv(ev, a, prefersReducedMotion ? 1 : Math.min(1, age / 0.35));
+      if (latest && age < 0.4 && !warp) {
         const k = 1 - age / 0.4, r = HR * 0.14 * (0.4 + 0.6 * (1 - k));
         const vg = c.createRadialGradient(cx, cy, 0, cx, cy, r);
         vg.addColorStop(0, `rgba(255,255,255,${0.9 * k * master})`); vg.addColorStop(0.35, `rgba(150,255,200,${0.5 * k * master})`); vg.addColorStop(1, 'rgba(60,255,140,0)');
         c.globalAlpha = 1; c.fillStyle = vg; c.beginPath(); c.arc(cx, cy, r, 0, TAU); c.fill();
       }
     });
+    if (bhA > 0) drawEv(bhE, bhA, prefersReducedMotion ? 1 : Math.min(1, (now - bhE.born) / 0.5));
     c.restore();
   }
+
+  /* What-if black hole: horizon, lensed accretion disk, Hawking evaporation. Slowed ~10²⁷× for display. */
+  let bhParts = null, bhRef = null, whStars = null, whRef = null, secretFn = null, taps = [];
+  function diskHalf(c, X, Y, rIn, rOut, a0, a1, k) {
+    if (k <= 0) return;
+    c.save(); c.translate(X, Y); c.scale(1, G.tilt);
+    const g = c.createRadialGradient(0, 0, rIn, 0, 0, rOut);
+    g.addColorStop(0, `rgba(255,245,220,${0.95 * k})`); g.addColorStop(0.18, `rgba(255,180,90,${0.75 * k})`);
+    g.addColorStop(0.55, `rgba(230,90,40,${0.32 * k})`); g.addColorStop(1, 'rgba(160,40,20,0)');
+    c.fillStyle = g; c.beginPath(); c.arc(0, 0, rOut, a0, a1); c.arc(0, 0, rIn, a1, a0, true); c.closePath(); c.fill();
+    c.restore();
+  }
+  function drawBlackHole(c, v, dt) {
+    const { x: X, y: Y } = holoCentre(), ty = G.tilt, vz = Math.sqrt(1 - ty * ty), t = v.t, ev = v.evapAt;
+    const rh0 = G.R * (G.compact ? 0.085 : 0.078) * Math.pow(v.M / 6000, 1 / 7);   // r_s ∝ M^{1/(n+1)}
+    const grow = smooth(0, 0.7, t), shrink = t < ev ? 1 : Math.max(0, 1 - (t - ev) / 0.28);
+    const rh = rh0 * grow * Math.sqrt(shrink);
+    const diskK = t < ev ? smooth(0.2, 1.2, t) : Math.max(0, 1 - (t - ev) / 0.6);
+    const rIn = rh0 * 1.7, rOut = rh0 * 4.6;
+    const fresh = all => ({ r: all ? rIn + Math.random() * (rOut - rIn) : rOut * (0.9 + Math.random() * 0.15), a: Math.random() * TAU, s: 0.6 + Math.random() * 1.3, hot: Math.random() });
+    if (bhRef !== v) { bhRef = v; bhParts = Array.from({ length: 90 }, () => fresh(true)); }
+    const spin = prefersReducedMotion ? 0.3 : 1;
+    for (const p of bhParts) {
+      if (t < ev) { p.a += dt * 2.6 * spin * Math.pow(rIn / p.r, 1.5); p.r -= dt * rh0 * spin * (0.25 + 0.9 * rIn / p.r); if (p.r < rIn * 0.98) Object.assign(p, fresh(false)); }
+      else { p.r += dt * rh0 * 9; p.a += dt * 0.8; }
+    }
+    const parts = front => {
+      for (const p of bhParts) {
+        const sn = Math.sin(p.a); if ((sn > 0) !== front) continue;
+        const beam = 0.55 + 0.45 * Math.cos(p.a);    // Doppler beaming: the approaching side is brighter
+        c.fillStyle = `rgba(255,${(170 + 80 * p.hot) | 0},${(90 + 130 * p.hot) | 0},${0.85 * diskK * beam})`;
+        c.beginPath(); c.arc(X + Math.cos(p.a) * p.r, Y + sn * p.r * ty, p.s, 0, TAU); c.fill();
+      }
+    };
+    c.save();
+    if (rh > 0.5) {   // lensing shadow: light from behind is bent away
+      const g = c.createRadialGradient(X, Y, rh * 0.8, X, Y, rh * 3.2);
+      g.addColorStop(0, `rgba(0,0,0,${0.75 * grow * shrink})`); g.addColorStop(1, 'rgba(0,0,0,0)');
+      c.fillStyle = g; c.beginPath(); c.arc(X, Y, rh * 3.2, 0, TAU); c.fill();
+    }
+    c.globalCompositeOperation = 'lighter';
+    diskHalf(c, X, Y, rIn, rOut, Math.PI, TAU, diskK); parts(false);
+    if (rh > 0.5) {   // far side of the disk, lensed over and under the horizon
+      c.lineWidth = rh * 0.42; c.strokeStyle = `rgba(255,170,90,${0.55 * diskK})`;
+      c.beginPath(); c.ellipse(X, Y, rh * 1.55, rh * 1.35, 0, Math.PI, TAU); c.stroke();
+      c.lineWidth = rh * 0.22; c.strokeStyle = `rgba(255,150,70,${0.28 * diskK})`;
+      c.beginPath(); c.ellipse(X, Y, rh * 1.45, rh * 1.18, 0, 0, Math.PI); c.stroke();
+    }
+    c.globalCompositeOperation = 'source-over';
+    c.fillStyle = '#000'; c.beginPath(); c.arc(X, Y, rh, 0, TAU); c.fill();
+    c.globalCompositeOperation = 'lighter';
+    c.lineWidth = 1.4; c.strokeStyle = `rgba(255,228,185,${0.85 * grow * shrink})`;
+    c.beginPath(); c.arc(X, Y, rh * 1.04, 0, TAU); c.stroke();          // photon ring
+    diskHalf(c, X, Y, rIn, rOut, 0, Math.PI, diskK); parts(true);
+    if (t < 0.5) {   // formation: two partons, one point
+      const k = 1 - t / 0.5, r = rh0 * (1 + 2.5 * t);
+      const g = c.createRadialGradient(X, Y, 0, X, Y, r);
+      g.addColorStop(0, `rgba(255,255,255,${k})`); g.addColorStop(1, 'rgba(255,200,140,0)');
+      c.fillStyle = g; c.beginPath(); c.arc(X, Y, r, 0, TAU); c.fill();
+    }
+    if (t >= ev) {   // evaporation burst: Hawking quanta in every direction
+      const u = Math.min(1, (t - ev) / (v.dur - ev)), k = 1 - u, R1 = rh0 * (1.5 + 10 * Math.sqrt(u));
+      const g = c.createRadialGradient(X, Y, 0, X, Y, R1);
+      g.addColorStop(0, `rgba(255,255,255,${k})`); g.addColorStop(0.2, `rgba(255,220,160,${0.8 * k})`);
+      g.addColorStop(0.55, `rgba(255,120,60,${0.25 * k})`); g.addColorStop(1, 'rgba(255,90,40,0)');
+      c.fillStyle = g; c.beginPath(); c.arc(X, Y, R1, 0, TAU); c.fill();
+      c.strokeStyle = `rgba(255,190,120,${0.5 * k})`; c.lineWidth = 1.5;
+      c.beginPath(); c.ellipse(X, Y, rh0 * (2 + 14 * u), rh0 * (2 + 14 * u) * ty, 0, 0, TAU); c.stroke();
+      if (!v.rays) v.rays = Array.from({ length: 46 }, () => {
+        const ct = 2 * Math.random() - 1, sn = Math.sqrt(1 - ct * ct), ph = Math.random() * TAU, r = Math.random();
+        return { dx: sn * Math.cos(ph), dy: sn * Math.sin(ph) * ty - ct * vz, L: rh0 * (3 + 9 * Math.random()),
+          col: r < 0.78 ? '255,180,80' : r < 0.84 ? '87,255,154' : r < 0.9 ? '255,90,122' : '255,227,122' };
+      });
+      const ext = Math.min(1, u * 3);
+      c.lineWidth = 1.3;
+      for (const ray of v.rays) {
+        c.strokeStyle = `rgba(${ray.col},${0.9 * k})`;
+        c.beginPath(); c.moveTo(X, Y); c.lineTo(X + ray.dx * ray.L * ext, Y + ray.dy * ray.L * ext); c.stroke();
+      }
+    }
+    c.restore();
+  }
+
+  /* Wormhole easter egg (fiction): a throat in the ring floor with a different sky at the far end. */
+  function drawWormhole(c, v) {
+    const { x: X, y: Y } = holoCentre(), ty = G.tilt, t = v.t, open = whOpen(v);
+    const Rw = G.R * (G.compact ? 0.5 : 0.46) * open;
+    if (whRef !== v) { whRef = v; whStars = Array.from({ length: 80 }, () => ({ a: Math.random() * TAU, r: Math.sqrt(Math.random()), tw: Math.random() * TAU, s: 0.5 + Math.random() * 1.3 })); }
+    const flow = prefersReducedMotion ? 0.2 : 1;
+    c.save();
+    if (Rw > 1) {
+      c.save(); c.translate(X, Y); c.scale(1, ty);
+      let g = c.createRadialGradient(0, 0, Rw * 0.6, 0, 0, Rw * 1.25);
+      g.addColorStop(0, `rgba(0,0,0,${0.9 * open})`); g.addColorStop(1, 'rgba(0,0,0,0)');
+      c.fillStyle = g; c.beginPath(); c.arc(0, 0, Rw * 1.25, 0, TAU); c.fill();
+      c.globalCompositeOperation = 'lighter';
+      for (let arm = 0; arm < 6; arm++) {        // spacetime swirling into the throat
+        c.beginPath();
+        for (let i = 0; i <= 50; i++) {
+          const u = i / 50, r = Rw * (2.0 - u), a = arm * TAU / 6 - t * 1.1 * flow + Math.log(r / Rw) * 2.6;
+          i ? c.lineTo(Math.cos(a) * r, Math.sin(a) * r) : c.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+        }
+        c.strokeStyle = `rgba(170,110,255,${0.32 * open})`; c.lineWidth = 1.6; c.stroke();
+      }
+      c.restore();
+      c.save();
+      c.beginPath(); c.ellipse(X, Y, Rw, Rw * ty, 0, 0, TAU); c.clip();
+      c.globalCompositeOperation = 'lighter';
+      // Perspective throat: rings shrink with depth and drop toward the near rim, staying inside the mouth
+      const ring = z => { const sc = 1 / (1 + 2.2 * z); return { x: X, y: Y + Rw * ty * 0.55 * (1 - sc) / 0.6875, rx: Rw * sc, ry: Rw * sc * ty }; };
+      const end = ring(1);
+      c.save(); c.translate(X, Y); c.scale(1, ty);          // throat wall glow, brightest at the rim
+      const gw = c.createRadialGradient(0, 0, Rw * 0.25, 0, 0, Rw);
+      gw.addColorStop(0, 'rgba(60,30,140,0)'); gw.addColorStop(0.75, `rgba(120,70,230,${0.22 * open})`); gw.addColorStop(1, `rgba(200,150,255,${0.5 * open})`);
+      c.fillStyle = gw; c.beginPath(); c.arc(0, 0, Rw, 0, TAU); c.fill();
+      c.restore();
+      const eR = end.rx * 1.9;
+      let g2 = c.createRadialGradient(end.x, end.y, 0, end.x, end.y, eR);
+      g2.addColorStop(0, `rgba(255,200,160,${0.55 * open})`); g2.addColorStop(0.3, `rgba(170,90,255,${0.5 * open})`); g2.addColorStop(1, 'rgba(40,20,110,0)');
+      c.fillStyle = g2; c.beginPath(); c.ellipse(end.x, end.y, eR, eR * ty, 0, 0, TAU); c.fill();
+      for (let arm = 0; arm < 2; arm++) {                    // a galaxy on the other side
+        c.beginPath();
+        for (let i = 0; i <= 40; i++) { const u = i / 40, r = end.rx * 1.1 * u, a = arm * Math.PI + u * 4.2 + t * 0.3; const x = end.x + Math.cos(a) * r, y = end.y + Math.sin(a) * r * ty; i ? c.lineTo(x, y) : c.moveTo(x, y); }
+        c.strokeStyle = `rgba(255,215,170,${0.55 * open})`; c.lineWidth = 2; c.stroke();
+      }
+      for (const st of whStars) {                 // somewhere else's sky
+        const a = 0.35 + 0.65 * Math.abs(Math.sin(t * 2.4 + st.tw));
+        c.fillStyle = `rgba(240,235,255,${a * open})`;
+        c.beginPath(); c.arc(end.x + Math.cos(st.a) * st.r * eR, end.y + Math.sin(st.a) * st.r * eR * ty, st.s * 1.3, 0, TAU); c.fill();
+      }
+      const N = 16;
+      for (let i = 0; i < N; i++) {
+        const z = ((i + t * 1.8 * flow) % N) / N, q = ring(z), al = open * (1 - z) * Math.min(1, z * 6);
+        const col = [200 - 110 * z, 120 + 100 * z, 255].map(x => x | 0).join(',');
+        c.strokeStyle = `rgba(${col},${al})`; c.lineWidth = 2.2 - z; c.shadowColor = `rgb(${col})`; c.shadowBlur = 6;
+        c.setLineDash([q.rx * 0.5, q.rx * 0.25]); c.lineDashOffset = (i % 2 ? 1 : -1) * t * 40 * flow;
+        c.beginPath(); c.ellipse(q.x, q.y, q.rx, q.ry, 0, 0, TAU); c.stroke();
+      }
+      c.setLineDash([]); c.shadowBlur = 0;
+      c.restore();
+      c.globalCompositeOperation = 'lighter';
+      c.shadowColor = '#b07bff'; c.shadowBlur = 14; c.lineWidth = 2;
+      c.strokeStyle = `rgba(225,185,255,${0.9 * open})`;
+      c.beginPath(); c.ellipse(X, Y, Rw, Rw * ty, 0, 0, TAU); c.stroke();
+      c.shadowBlur = 0;
+    }
+    c.globalCompositeOperation = 'lighter';
+    for (const [t0, big] of [[0, 0.6], [v.dur - 0.5, 1]]) {   // open and close flashes
+      const u = (t - t0) / 0.5; if (u < 0 || u > 1) continue;
+      const k = 1 - u, r = G.R * 0.25 * big * (0.4 + u);
+      const g = c.createRadialGradient(X, Y, 0, X, Y, r);
+      g.addColorStop(0, `rgba(255,255,255,${0.9 * k})`); g.addColorStop(0.4, `rgba(190,130,255,${0.5 * k})`); g.addColorStop(1, 'rgba(160,90,255,0)');
+      c.fillStyle = g; c.beginPath(); c.arc(X, Y, r, 0, TAU); c.fill();
+    }
+    c.restore();
+  }
+  function drawExotic(c, dt) {
+    const v = Exotica.visual(); if (!v) return;
+    if (v.kind === 'bh') drawBlackHole(c, v, dt); else drawWormhole(c, v);
+  }
+  // Second secret: five quick taps on the centre of the ring
+  cv.addEventListener('pointerdown', e => {
+    if (!G) return;
+    const r = cv.getBoundingClientRect(), { x, y } = holoCentre();
+    const dx = (e.clientX - r.left - x) / (G.R * 0.6), dy = (e.clientY - r.top - y) / (G.R * 0.6 * G.tilt);
+    if (dx * dx + dy * dy > 1) { taps = []; return; }
+    const now = performance.now(); taps = taps.filter(t => now - t < 2500); taps.push(now);
+    if (taps.length >= 5) { taps = []; if (secretFn) secretFn(); }
+  });
+  const setSecret = fn => { secretFn = fn; };
 
   function draw(dt, d, S, holo) {
     if (!G) return;
@@ -1181,6 +1491,7 @@ const RingView = (() => {
     }
 
     drawHologram(ctx, holo, d);
+    drawExotic(ctx, dt);
     ctx.drawImage(front.c, 0, 0, W, H);
 
     // Collision flashes: frequency and brightness scale with luminosity / pile-up
@@ -1310,7 +1621,7 @@ const RingView = (() => {
     c.textAlign = 'left';
   }
 
-  return { layout, draw, notify };
+  return { layout, draw, notify, setSecret };
 })();
 
 /* =====================================================================
@@ -1431,6 +1742,8 @@ const EventDisplay = (() => {
   const MIX = { golden: 0.03, dijet: 0.15 }; // display-enriched sampling (true rates are many orders smaller)
   let W = 0, H = 0, dpr = 1, geo = null, bg = null;
   let events = [], acc = 0, shownRate = 0, sampling = Infinity, lastMetaUpdate = 0;
+  let lastD = null, bhEvt = null;
+  const BH_HOLD = 4.5, TWO_PI = Math.PI * 2;
 
   // Radial scale (m → fraction of display radius): tracker gets 46%, calorimeters 26%, muon system 28%.
   function mapR(r) {
@@ -1544,7 +1857,49 @@ const EventDisplay = (() => {
     return { born: performance.now() / 1000, type, tracks, towers, verts, pv: RNG.gauss() * sig, sig, nTrk: tracks.length, nPU, summary, number: Math.floor(d.eventsTotal) };
   }
 
+  /* What-if black hole decay: democratic Hawking emission, energies shared at random, isotropic directions */
+  function makeBHEvent(d, bh) {
+    const tracks = [], towers = [];
+    const tw = (phi, dphi, r0, r1, color, a) => towers.push({ phi, dphi, r0, r1, color, a });
+    const hadron = (pt, phi, q, a) => tracks.push({ pts: propagate(pt, phi, q, 1.1).pts, color: '#8cc4ff', w: 1, a });
+    const nSoft = RNG.poisson(P.dNchdEta(d.sqrtS) * 5 * 0.6);
+    for (let i = 0; i < nSoft; i++) hadron(0.3 + RNG.exp(0.45), Math.random() * TWO_PI, Math.random() < 0.5 ? 1 : -1, 0.5);
+    const nQ = Math.max(3, RNG.poisson(bh.nQ));
+    const w = Array.from({ length: nQ }, () => RNG.exp(1)), wsum = w.reduce((a, b) => a + b, 0);
+    const cnt = { jet: 0, e: 0, mu: 0, ph: 0 }; let mx = 0, my = 0;
+    for (let i = 0; i < nQ; i++) {
+      const E = bh.M * w[i] / wsum, cosT = 2 * Math.random() - 1, pt = E * Math.sqrt(1 - cosT * cosT);
+      const phi = Math.random() * TWO_PI, q = Math.random() < 0.5 ? 1 : -1, r = Math.random();
+      if (r < 0.78) {                    // quarks and gluons (W, Z, H folded in) → jets
+        cnt.jet++;
+        const n = Math.min(26, 6 + RNG.poisson(3 + pt / 250));
+        for (let j = 0; j < n; j++) hadron(2 + RNG.exp(pt * 0.05), phi + RNG.gauss() * 0.07, Math.random() < 0.5 ? 1 : -1, 0.95);
+        tw(phi, 0.2, 1.29, 1.75, '87,255,154', 0.5);
+        tw(phi, 0.24, 1.8, 1.8 + Math.min(1.15, 0.18 * Math.log(1 + pt)), '255,170,70', 0.9);
+      } else if (r < 0.84) {             // electron
+        cnt.e++; tracks.push({ pts: propagate(pt, phi, q, 1.29).pts, color: '#57ff9a', w: 2, a: 1, glow: true });
+        tw(phi, 0.06, 1.29, 1.75, '87,255,154', 0.95);
+      } else if (r < 0.9) {              // muon
+        cnt.mu++; tracks.push({ pts: propagate(pt, phi, q, 7.3).pts, color: '#ff5a7a', w: 2, a: 1, glow: true });
+      } else if (r < 0.93) {             // photon: no track, ECAL deposit
+        cnt.ph++; tracks.push({ pts: [[0, 0], [Math.cos(phi) * 1.29, Math.sin(phi) * 1.29]], color: '#ffe37a', w: 1.5, a: 0.9, dash: [4, 3] });
+        tw(phi, 0.06, 1.29, 1.75, '255,227,122', 0.95);
+      } else { mx += pt * Math.cos(phi); my += pt * Math.sin(phi); }   // neutrino: invisible
+    }
+    const met = Math.hypot(mx, my);
+    if (met > 50) { const ph = Math.atan2(my, mx); tracks.push({ pts: [[0, 0], [Math.cos(ph) * 3.4, Math.sin(ph) * 3.4]], color: '#ff7ad9', w: 1.6, a: 0.9, dash: [6, 4] }); }
+    const nPU = Math.min(400, RNG.poisson(d.mu)), sig = d.lumRegion, verts = [];
+    for (let i = 0; i < nPU; i++) verts.push(RNG.gauss() * sig);
+    const parts = [cnt.jet && `${cnt.jet} jets`, cnt.e && `${cnt.e} e`, cnt.mu && `${cnt.mu} μ`, cnt.ph && `${cnt.ph} γ`].filter(Boolean).join(', ');
+    return { born: performance.now() / 1000, type: 'bh', tracks, towers, verts, pv: RNG.gauss() * sig, sig, nTrk: tracks.length, nPU,
+      number: Math.floor(d.eventsTotal), summary: `black hole candidate (what-if), M ≈ ${(bh.M / 1000).toFixed(2)} TeV`,
+      detail: `${nQ} Hawking quanta at T_H ≈ ${bh.TH.toFixed(0)} GeV: ${parts}${met > 50 ? `, MET ${met.toFixed(0)} GeV` : ''}` };
+  }
+  function exotic(e) { if (e.type === 'bhEvaporate' && lastD) bhEvt = makeBHEvent(lastD, e.bh); }
+  const bhLive = now => bhEvt && now - bhEvt.born < BH_HOLD;
+
   function update(dt, d) {
+    lastD = d;
     if (d.colliding) {
       const want = d.R * K_DISPLAY;
       shownRate = Math.min(want, CAP);
@@ -1559,10 +1914,11 @@ const EventDisplay = (() => {
     ctx.drawImage(bg.c, 0, 0, W, H);
     const now = performance.now() / 1000;
     ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    const whv = Exotica.visual(), whK = whv && whv.kind === 'wh' ? 1 - Math.max(0, Math.min(1, whv.t, whv.dur - whv.t)) : 1;
     events.forEach((ev, idx) => {
       const latest = idx === events.length - 1;
       const age = now - ev.born;
-      const a = latest ? Math.max(0.65, 1 - age / 1.6) : Math.max(0, 0.6 - age / 1.6);
+      const a = whK * (latest ? Math.max(0.65, 1 - age / 1.6) : Math.max(0, 0.6 - age / 1.6));
       if (a <= 0) return;
       for (const t of ev.towers) {
         ctx.fillStyle = `rgba(${t.color},${t.a * a})`;
@@ -1586,16 +1942,51 @@ const EventDisplay = (() => {
         ctx.fillStyle = pc; ctx.beginPath(); ctx.arc(zx(ev.pv), y, 3.5, 0, Math.PI * 2); ctx.fill();
       }
     });
+    if (bhLive(now)) {
+      const ev = bhEvt, a = Math.min(1, 1.25 * (1 - (now - ev.born) / BH_HOLD));
+      for (const t of ev.towers) {
+        ctx.fillStyle = `rgba(${t.color},${t.a * a})`;
+        const r0 = mapR(t.r0) * geo.R, r1 = mapR(t.r1) * geo.R;
+        ctx.beginPath(); ctx.arc(geo.cx, geo.cy, r1, -t.phi - t.dphi / 2, -t.phi + t.dphi / 2); ctx.arc(geo.cx, geo.cy, r0, -t.phi + t.dphi / 2, -t.phi - t.dphi / 2, true); ctx.closePath(); ctx.fill();
+      }
+      for (const t of ev.tracks) {
+        ctx.strokeStyle = t.color; ctx.globalAlpha = t.a * a; ctx.lineWidth = t.w;
+        if (t.glow) { ctx.shadowColor = t.color; ctx.shadowBlur = 8; } else ctx.shadowBlur = 0;
+        if (t.dash) ctx.setLineDash(t.dash);
+        ctx.beginPath(); t.pts.forEach((p, i) => { const [x, y] = toPx(p[0], p[1]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+    }
+    const wh = Exotica.visual();
+    if (wh && wh.kind === 'wh') {      // easter egg: the detector sees nothing it can describe
+      const k = Math.max(0, Math.min(1, wh.t, wh.dur - wh.t));
+      for (let arm = 0; arm < 5; arm++) {
+        ctx.beginPath();
+        for (let i = 0; i <= 80; i++) {
+          const u = i / 80, r = geo.R * 0.95 * Math.exp(-3.2 * u), a = arm * TWO_PI / 5 + u * 7 + wh.t * 1.4;
+          i ? ctx.lineTo(geo.cx + Math.cos(a) * r, geo.cy + Math.sin(a) * r) : ctx.moveTo(geo.cx + Math.cos(a) * r, geo.cy + Math.sin(a) * r);
+        }
+        ctx.strokeStyle = `rgba(190,130,255,${0.45 * k})`; ctx.lineWidth = 1.4; ctx.stroke();
+      }
+      ctx.fillStyle = `rgba(235,220,255,${0.9 * k})`; ctx.font = '30px ui-monospace,"SF Mono",Menlo,Consolas,monospace';
+      ctx.textAlign = 'center'; ctx.fillText('∞', geo.cx, geo.cy + 10); ctx.textAlign = 'left';
+    }
     ctx.restore();
-    if (!events.length) {
+    if (!events.length && !bhLive(now)) {
       ctx.fillStyle = 'rgba(130,150,200,0.75)'; ctx.font = '11px ui-monospace,"SF Mono",Menlo,Consolas,monospace'; ctx.textAlign = 'center';
       ctx.fillText('no collisions', geo.cx, geo.cy + 4); ctx.textAlign = 'left';
     }
     if (now - lastMetaUpdate > 0.25) {
       lastMetaUpdate = now;
       rateEl.textContent = d.colliding ? `${shownRate.toFixed(1)} shown/s` : '';
-      const ev = events[events.length - 1];
-      if (ev) {
+      const ev = events[events.length - 1], wh = Exotica.visual();
+      if (wh && wh.kind === 'wh') {
+        metaEl.innerHTML = 'Event ∞: wormhole (easter egg, fiction)<br>Holding a throat open needs negative energy, which no known physics provides.<br><span class="dim">No detector has ever recorded one. Normal events resume when it closes.</span>';
+      } else if (bhLive(now)) {
+        metaEl.innerHTML = `Event ${bhEvt.number.toLocaleString('en-US')}: ${bhEvt.summary}<br>${bhEvt.detail}<br>` +
+          '<span class="dim">What-if TeV-scale gravity event (M_D = 1 TeV, n = 6), a scenario LHC data rules out.</span>';
+      } else if (ev) {
         metaEl.innerHTML =
           `Event ${ev.number.toLocaleString('en-US')}: ${ev.summary}<br>` +
           `${ev.nTrk} tracks drawn, ${ev.nPU} pile-up vertices, σ_lum ${(ev.sig * 100).toFixed(1)} cm<br>` +
@@ -1605,8 +1996,8 @@ const EventDisplay = (() => {
       }
     }
   }
-  const recent = () => ({ events, mapR });
-  return { layout, update, draw, recent };
+  const recent = () => ({ events, bh: bhLive(performance.now() / 1000) ? bhEvt : null });
+  return { layout, update, draw, recent, exotic };
 })();
 
 /* =====================================================================
@@ -1703,12 +2094,52 @@ const UI = (() => {
   function wireButtons() {
     document.querySelectorAll('.step').forEach(b => b.addEventListener('click', () => press(b.dataset.act)));
     $('presetNominal').addEventListener('click', () => { Object.assign(S, NOMINAL); syncAll(); });
+    $('whatIfBH').addEventListener('click', () => setWhatIf(!Exotica.st.on));
+    // Easter egg: ↑ ↑ ↓ ↓ ← → ← → B A
+    const KONAMI = ['arrowup', 'arrowup', 'arrowdown', 'arrowdown', 'arrowleft', 'arrowright', 'arrowleft', 'arrowright', 'b', 'a'];
+    let kpos = 0;
+    window.addEventListener('keydown', e => {
+      const k = (e.key || '').toLowerCase();
+      if (k === KONAMI[kpos]) kpos++;
+      else kpos = k === 'arrowup' ? (kpos === 2 ? 2 : 1) : 0;
+      if (kpos === KONAMI.length) { kpos = 0; openWormhole(); }
+    });
     window.addEventListener('keydown', e => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const map = { i: 'inject', r: 'ramp', s: 'squeeze', c: 'collide', d: 'dump' };
       const a = map[e.key.toLowerCase()]; if (a) { press(a); }
     });
   }
+  /* What-if mode + easter egg */
+  const xs = x => x >= 0.1 ? `${x.toPrecision(3)} pb` : `${Fmt.sci(x, 1)} pb`;
+  function setWhatIf(on) {
+    Exotica.setOn(on);
+    $('whatIfBH').setAttribute('aria-pressed', on ? 'true' : 'false');
+    $('bhNote').hidden = !on;
+    log(on ? 'warn' : 'info', on ? 'What-if on: TeV-scale gravity (M_D = 1 TeV, 6 extra dimensions). LHC data rules this scenario out.' : 'What-if off: back to the Standard Model.', M.st.simTime);
+  }
+  function openWormhole() {
+    if (!Exotica.openWormhole()) return;
+    banner('wh', 'WORMHOLE (FICTION)', 'Easter egg. Holding a traversable wormhole open needs negative energy, which no known physics provides, and no collider can make one.', 7);
+    log('info', 'Easter egg: a fictional wormhole opened in the ring.', M.st.simTime);
+  }
+  function exotic(e) {
+    if (e.type !== 'bhShow') return;
+    const b = e.bh;
+    banner('bh', 'MICRO BLACK HOLE (WHAT-IF)', `M = ${(b.M / 1000).toFixed(2)} TeV at IP1, r_s = ${Fmt.sci(b.rs_m, 1)} m, T_H = ${b.TH.toFixed(0)} GeV. It evaporates into Hawking radiation in ${Fmt.sci(b.life, 1)} s, shown here slowed down about 10²⁷ times.`, 4.2);
+    log('warn', `What-if black hole at IP1: M = ${(b.M / 1000).toFixed(2)} TeV, T_H = ${b.TH.toFixed(0)} GeV, τ = ${Fmt.sci(b.life, 1)} s.`, M.st.simTime);
+  }
+  function updateWhatIf(d) {
+    if (!Exotica.st.on) return;
+    const sq = d.beam ? d.sqrtS : d.sqrtSset, thr = P.K.BH_MMIN_GEV / 1000, sig = P.bhSigma_pb(sq);
+    let live;
+    if (sq <= thr) live = `√s = ${sq.toFixed(2)} TeV is below the ${thr} TeV threshold: no black holes. Raise the beam energy above ${(thr / 2).toFixed(1)} TeV.`;
+    else if (d.colliding) live = `σ_BH = ${xs(sig)} at √s = ${sq.toFixed(2)} TeV, so ${(r => r >= 0.01 ? r.toPrecision(3) : Fmt.sci(r, 1))(Exotica.rate(d))} per second at IP1. Brighter beams make them more often.`;
+    else live = `σ_BH = ${xs(sig)} at √s = ${sq.toFixed(2)} TeV. Declare stable beams to make them.`;
+    $('bhNote').innerHTML = `<b>Black holes formed: ${Exotica.st.formed.toLocaleString('en-US')}</b> · ${live}<br>` +
+      'Speculative: needs gravity to turn strong at 1 TeV in 6 extra dimensions. ATLAS and CMS searched and found none, so this is ruled out.';
+  }
+
   function updateButtons(d) {
     const stage = ORDER[d.mode] ?? 0;
     let nextSet = false;
@@ -1757,6 +2188,7 @@ const UI = (() => {
     if (bannerTimer > 0) { bannerTimer -= dt; if (bannerTimer <= 0) hideBanner(); }
     if (hintOverrideT > 0) { hintOverrideT -= dt; if (hintOverrideT <= 0) hintOverride = null; }
     acc += dt; if (acc < 1 / 12) return; acc = 0;
+    updateWhatIf(d);
 
     // Sticky banners: quench cooldown, low intensity suggestion
     if (d.mode === 'QUENCH') banner('quench', 'MAGNET QUENCH', `Dipoles quenched at ${d.quenchB.toFixed(2)} T. Field collapsing (${d.B.toFixed(2)} T). Cryogenic recovery ${Math.ceil(d.quenchTimer)} s before re-ramp.`, 0.3);
@@ -1829,12 +2261,13 @@ const UI = (() => {
       `<p><b>Lifetime.</b> <code>dN_tot/dt = −k L σ_tot − N_tot/τ_gas</code> with k = 2 high-luminosity IPs, σ_tot = 110 mb at 14 TeV (same √s scaling), τ_gas = 100 h. Burn-off lifetime <code>τ = N_tot/(k L σ_tot)</code>.</p>`,
       `<p><b>Magnets.</b> Above 8.33 T a training-quench hazard grows as ((B − 8.33)/0.67)², up to ${K.QUENCH_HAZARD_MAX_PER_S}/s near 9 T; at 9 T the dipoles always quench. Cryogenic recovery is compressed to ${K.QUENCH_RECOVERY_S} real seconds.</p>`,
       `<p><b>Operations.</b> Injection: ⌈n_b/288⌉ SPS transfers per ring, ${K.SPS_CYCLE_S} s each. Squeeze: β* from 11 m, ln β* falls at ${(K.SQUEEZE_LN_RATE * 3600).toFixed(1)} per hour (11 m to 55 cm in 15 min). 25 ns filling scheme with trains of 72 and a 119-slot abort gap.</p>`,
+      `<p><b>What-if: TeV-scale gravity (ruled out).</b> With n = ${K.BH_N_EXTRA} large extra dimensions and M_D = ${K.BH_MD_GEV / 1000} TeV, partons colliding above M_min = ${K.BH_MMIN_GEV / 1000} TeV form black holes with <code>σ̂ = π r_s²</code>, <code>r_s = [8Γ((n+3)/2)/(n+2) · M/M_D]^{1/(n+1)} / (√π M_D)</code>, folded with toy proton PDFs: σ_BH = ${P.bhSigma_pb(14).toFixed(0)} pb at 14 TeV, zero below √s = 5 TeV. Each evaporates at <code>T_H = (n+1)/(4π r_s)</code> into about <code>M/(2T_H)</code> quanta within <code>τ ≈ (ħ/M_D)(M/M_D)^{(n+3)/(n+1)}</code> ≈ 10⁻²⁷ s. The count is σ_BH ∫L dt at IP1; one at a time is drawn, slowed about 10²⁷×. LHC searches found none, which rules this scenario out. The wormhole is a fictional easter egg.</p>`,
       `<p><b>Display only.</b> Bunch motion, flash rate (6 per s per 10³⁴, weighted 1/1/0.25/0.08 for IP1/5/8/2) and the event sampling factor are visual scalings. The event display draws a toy generator in a CMS-like 3.8 T geometry with a display-enriched event mix; its track count follows dN/dη ∝ s^0.103 and its pile-up follows μ. The ring centre projects the same IP1 events into the ring plane.</p>`,
     ].join('');
   }
 
   function init() { buildSliders(); buildTiles(); wireButtons(); buildReference(); log('info', 'Machine at injection field. Ready to inject.', 0); }
-  return { S, init, update, notify };
+  return { S, init, update, notify, exotic, openWormhole };
 })();
 
 /* =====================================================================
@@ -1842,6 +2275,7 @@ const UI = (() => {
    ===================================================================== */
 (() => {
   UI.init();
+  RingView.setSecret(UI.openWormhole);
   const relayout = () => { RingView.layout(); Scope.layout(); EventDisplay.layout(); };
   relayout();
   let rt = 0;
@@ -1853,6 +2287,7 @@ const UI = (() => {
     Machine.step(dt, S);
     for (const n of Machine.drain()) { UI.notify(n); RingView.notify(n); }
     const d = Machine.derive(S);
+    for (const e of Exotica.update(dt, d)) { UI.exotic(e); EventDisplay.exotic(e); }
     RingView.draw(dt, d, S, EventDisplay.recent());
     Scope.update(dt, d); Scope.draw(d);
     EventDisplay.update(dt, d); EventDisplay.draw(d);
