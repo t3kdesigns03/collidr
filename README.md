@@ -111,3 +111,5 @@ about 8% above the 3.6 kW figure in the brief. The formula is kept as specified 
   factor (R × 5 × 10⁻⁹, capped at 20/s). The event display is a toy generator in a CMS-like
   3.8 T geometry with a display-enriched mix (15% dijet, 3% multi-lepton); the panel prints the
   sampling factor so it always agrees with the event-rate readout.
+- The empty centre of the ring shows a hologram of the same IP1 events as the event display,
+  projected into the ring plane with a wider tracker scale so the curling soft tracks are visible.

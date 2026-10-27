@@ -1059,7 +1059,69 @@ const RingView = (() => {
     }
   }
 
-  function draw(dt, d, S) {
+  /* IP1 event hologram: the event display's latest tracks, projected into the ring plane at the centre.
+     Same events, same radial mapping as the side panel; display only. */
+  function drawHologram(c, holo, d) {
+    if (!holo || !holo.events.length) return;
+    const list = holo.events, now = performance.now() / 1000;
+    // Own radial scale: the tracker (where the curling tracks live) gets 62% of the radius here.
+    const mapR = r => r <= 1.1 ? r / 1.1 * 0.62 : r <= 3.0 ? 0.62 + (r - 1.1) / 1.9 * 0.2 : 0.82 + Math.min(r - 3.0, 4.4) / 4.4 * 0.18;
+    const lAge = now - list[list.length - 1].born;
+    const master = d.colliding ? 1 : Math.max(0, 1 - lAge / 2.5);
+    if (master <= 0) return;
+    const HR = G.R * (G.compact ? 0.62 : 0.68), ty = G.tilt;
+    const cx = G.cx, cy = G.cy - G.R * 0.04;
+    const pt = (x, y) => { const r = Math.hypot(x, y); if (r === 0) return [cx, cy]; const k = mapR(r) * HR / r; return [cx + x * k, cy - y * k * ty]; };
+    c.save(); c.globalCompositeOperation = 'lighter';
+    // Link from the IP1 detector to the projection
+    const ip = proj(POINT(1));
+    c.globalAlpha = 0.24 * master; c.strokeStyle = '#57ff9a'; c.lineWidth = 1; c.setLineDash([3, 5]);
+    c.beginPath(); c.moveTo(ip.x, ip.y - G.R * 0.05); c.lineTo(cx, cy); c.stroke(); c.setLineDash([]);
+    // Soft projection field, flattened to the ring plane
+    c.save(); c.translate(cx, cy); c.scale(1, ty);
+    const fg = c.createRadialGradient(0, 0, 0, 0, 0, HR);
+    fg.addColorStop(0, 'rgba(87,255,154,0.10)'); fg.addColorStop(0.55, 'rgba(70,140,255,0.05)'); fg.addColorStop(1, 'rgba(70,140,255,0)');
+    c.globalAlpha = master; c.fillStyle = fg; c.beginPath(); c.arc(0, 0, HR, 0, TAU); c.fill();
+    c.restore();
+    // Detector layer outlines: tracker, ECAL, HCAL, solenoid, muon system
+    c.strokeStyle = '#8cb4ff'; c.lineWidth = 1;
+    for (const [r, a] of [[1.1, 0.14], [1.29, 0.08], [1.8, 0.08], [3.0, 0.16], [7.4, 0.1]]) {
+      const rr = mapR(r) * HR; c.globalAlpha = a * master;
+      c.beginPath(); c.ellipse(cx, cy, rr, rr * ty, 0, 0, TAU); c.stroke();
+    }
+    list.forEach((ev, idx) => {
+      const latest = idx === list.length - 1, age = now - ev.born;
+      const a = master * (latest ? Math.max(0.6, 1 - age / 1.6) : Math.max(0, 0.45 - age / 1.2));
+      if (a <= 0.01) return;
+      const grow = prefersReducedMotion ? 1 : Math.min(1, age / 0.35);
+      for (const t of ev.towers) {
+        c.globalAlpha = 1; c.fillStyle = `rgba(${t.color},${t.a * a * 0.8 * grow * grow})`;
+        c.beginPath();
+        for (let i = 0; i <= 6; i++) { const ph = t.phi - t.dphi / 2 + t.dphi * i / 6, [x, y] = pt(Math.cos(ph) * t.r1, Math.sin(ph) * t.r1); i ? c.lineTo(x, y) : c.moveTo(x, y); }
+        for (let i = 6; i >= 0; i--) { const ph = t.phi - t.dphi / 2 + t.dphi * i / 6, [x, y] = pt(Math.cos(ph) * t.r0, Math.sin(ph) * t.r0); c.lineTo(x, y); }
+        c.closePath(); c.fill();
+      }
+      for (const t of ev.tracks) {
+        const n = Math.min(t.pts.length, Math.max(2, Math.ceil(t.pts.length * grow)));
+        c.beginPath();
+        for (let i = 0; i < n; i++) { const [x, y] = pt(t.pts[i][0], t.pts[i][1]); i ? c.lineTo(x, y) : c.moveTo(x, y); }
+        c.strokeStyle = t.color; c.shadowBlur = 0;
+        c.globalAlpha = 0.22 * t.a * a; c.lineWidth = t.w * 4.5; c.stroke();             // halo
+        if (t.glow) { c.shadowColor = t.color; c.shadowBlur = 12; }
+        c.globalAlpha = Math.min(1, 1.35 * t.a * a); c.lineWidth = t.w * (G.compact ? 1.1 : 1.4); c.stroke();
+      }
+      c.shadowBlur = 0;
+      if (latest && age < 0.4) {
+        const k = 1 - age / 0.4, r = HR * 0.14 * (0.4 + 0.6 * (1 - k));
+        const vg = c.createRadialGradient(cx, cy, 0, cx, cy, r);
+        vg.addColorStop(0, `rgba(255,255,255,${0.9 * k * master})`); vg.addColorStop(0.35, `rgba(150,255,200,${0.5 * k * master})`); vg.addColorStop(1, 'rgba(60,255,140,0)');
+        c.globalAlpha = 1; c.fillStyle = vg; c.beginPath(); c.arc(cx, cy, r, 0, TAU); c.fill();
+      }
+    });
+    c.restore();
+  }
+
+  function draw(dt, d, S, holo) {
     if (!G) return;
     time += dt;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -1118,6 +1180,7 @@ const RingView = (() => {
       debris = debris.filter(p => p.life > 0);
     }
 
+    drawHologram(ctx, holo, d);
     ctx.drawImage(front.c, 0, 0, W, H);
 
     // Collision flashes: frequency and brightness scale with luminosity / pile-up
@@ -1542,7 +1605,8 @@ const EventDisplay = (() => {
       }
     }
   }
-  return { layout, update, draw };
+  const recent = () => ({ events, mapR });
+  return { layout, update, draw, recent };
 })();
 
 /* =====================================================================
@@ -1765,7 +1829,7 @@ const UI = (() => {
       `<p><b>Lifetime.</b> <code>dN_tot/dt = −k L σ_tot − N_tot/τ_gas</code> with k = 2 high-luminosity IPs, σ_tot = 110 mb at 14 TeV (same √s scaling), τ_gas = 100 h. Burn-off lifetime <code>τ = N_tot/(k L σ_tot)</code>.</p>`,
       `<p><b>Magnets.</b> Above 8.33 T a training-quench hazard grows as ((B − 8.33)/0.67)², up to ${K.QUENCH_HAZARD_MAX_PER_S}/s near 9 T; at 9 T the dipoles always quench. Cryogenic recovery is compressed to ${K.QUENCH_RECOVERY_S} real seconds.</p>`,
       `<p><b>Operations.</b> Injection: ⌈n_b/288⌉ SPS transfers per ring, ${K.SPS_CYCLE_S} s each. Squeeze: β* from 11 m, ln β* falls at ${(K.SQUEEZE_LN_RATE * 3600).toFixed(1)} per hour (11 m to 55 cm in 15 min). 25 ns filling scheme with trains of 72 and a 119-slot abort gap.</p>`,
-      `<p><b>Display only.</b> Bunch motion, flash rate (6 per s per 10³⁴, weighted 1/1/0.25/0.08 for IP1/5/8/2) and the event sampling factor are visual scalings. The event display draws a toy generator in a CMS-like 3.8 T geometry with a display-enriched event mix; its track count follows dN/dη ∝ s^0.103 and its pile-up follows μ.</p>`,
+      `<p><b>Display only.</b> Bunch motion, flash rate (6 per s per 10³⁴, weighted 1/1/0.25/0.08 for IP1/5/8/2) and the event sampling factor are visual scalings. The event display draws a toy generator in a CMS-like 3.8 T geometry with a display-enriched event mix; its track count follows dN/dη ∝ s^0.103 and its pile-up follows μ. The ring centre projects the same IP1 events into the ring plane.</p>`,
     ].join('');
   }
 
@@ -1789,7 +1853,7 @@ const UI = (() => {
     Machine.step(dt, S);
     for (const n of Machine.drain()) { UI.notify(n); RingView.notify(n); }
     const d = Machine.derive(S);
-    RingView.draw(dt, d, S);
+    RingView.draw(dt, d, S, EventDisplay.recent());
     Scope.update(dt, d); Scope.draw(d);
     EventDisplay.update(dt, d); EventDisplay.draw(d);
     UI.update(d, dt);
