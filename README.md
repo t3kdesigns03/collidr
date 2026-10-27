@@ -98,8 +98,8 @@ this and found nothing, so the page labels it as excluded everywhere it appears.
 
 ## Easter egg: wormhole (fiction)
 
-Type the Konami code (↑ ↑ ↓ ↓ ← → ← → B A), or tap the centre of the ring five times quickly on a phone,
-to open a wormhole in the ring floor for 12 seconds. It is labelled as fiction: holding a traversable
+Type the Konami code (↑ ↑ ↓ ↓ ← → ← → B A), or click or tap the centre of the ring five times within
+2.5 seconds (mouse or touch), to open a wormhole in the ring floor for 12 seconds. It is labelled as fiction: holding a traversable
 wormhole open needs negative energy, which no known physics provides.
 
 ## Physics
