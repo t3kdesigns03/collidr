@@ -1,0 +1,1802 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CoLLiDr: hadron collider simulator</title>
+<meta name="description" content="Interactive LHC-scale hadron collider simulator. Inject, ramp, squeeze and collide proton beams with real accelerator physics.">
+<meta name="theme-color" content="#03050b">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2303050b'/%3E%3Cellipse cx='32' cy='34' rx='22' ry='11' fill='none' stroke='%233d8bff' stroke-width='4'/%3E%3Ccircle cx='32' cy='45' r='5' fill='%2357ff9a'/%3E%3C/svg%3E">
+<style>
+:root{
+  --void:#03050b;
+  --glass:rgba(10,16,33,.86);
+  --glass-2:rgba(20,31,60,.5);
+  --line:rgba(132,170,255,.13);
+  --line-2:rgba(132,170,255,.28);
+  --ink:#eaf0ff;
+  --ink-2:#a8b5d6;
+  --ink-3:#66739a;
+  --neon:#3d8bff;
+  --ice:#a9d6ff;
+  --violet:#a46bff;
+  --violet-2:#d2a8ff;
+  --hit:#57ff9a;
+  --warn:#ffb547;
+  --alarm:#ff5a5f;
+  --quench:#ff7a3d;
+  --mono:ui-monospace,"SF Mono","JetBrains Mono","Cascadia Mono",Menlo,Consolas,monospace;
+  --sans:"Helvetica Neue","Inter",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+html,body{margin:0;background:var(--void);color:var(--ink);font-family:var(--sans);font-weight:300}
+body{
+  min-height:100vh;
+  padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px);
+  background:
+    radial-gradient(1100px 620px at 28% -8%, rgba(30,60,150,.28), transparent 62%),
+    radial-gradient(800px 500px at 95% 10%, rgba(120,70,220,.10), transparent 60%),
+    var(--void);
+}
+button,input{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--ice);outline-offset:2px}
+.app{max-width:1500px;margin:0 auto;padding:14px 16px 28px}
+
+/* ---------- Page 1 header (styled after the LHC operations status screen) ---------- */
+.page1{
+  display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:18px;
+  padding:10px 4px 16px;border-bottom:1px solid var(--line);margin-bottom:14px;
+}
+.brand{display:flex;align-items:baseline;gap:12px}
+.brand h1{margin:0;font-size:26px;font-weight:200;letter-spacing:.06em}
+.brand h1 b{font-weight:500;color:var(--ice)}
+.brand span{color:var(--ink-3);font-size:13px}
+.status{display:flex;gap:22px;justify-content:center;flex-wrap:wrap;font-size:13px;color:var(--ink-2)}
+.status div{display:flex;flex-direction:column;gap:2px}
+.status small{color:var(--ink-3);font-size:11px}
+.status output{font-family:var(--mono);font-size:14px;color:var(--ink)}
+.mode{
+  display:inline-flex;align-items:center;gap:8px;padding:5px 12px;border-radius:999px;
+  border:1px solid var(--line-2);background:var(--glass-2);font-family:var(--mono);font-size:13px;
+}
+.mode i{width:8px;height:8px;border-radius:50%;background:var(--ink-3);box-shadow:0 0 8px currentColor}
+.mode[data-tone="ok"]{border-color:rgba(87,255,154,.45);color:var(--hit)}
+.mode[data-tone="ok"] i{background:var(--hit)}
+.mode[data-tone="busy"]{border-color:rgba(61,139,255,.5);color:var(--ice)}
+.mode[data-tone="busy"] i{background:var(--neon)}
+.mode[data-tone="warn"]{border-color:rgba(255,181,71,.5);color:var(--warn)}
+.mode[data-tone="warn"] i{background:var(--warn)}
+.mode[data-tone="alarm"]{border-color:rgba(255,90,95,.6);color:var(--alarm)}
+.mode[data-tone="alarm"] i{background:var(--alarm)}
+.sqrts{text-align:right;line-height:1}
+.sqrts small{display:block;color:var(--ink-3);font-size:12px;margin-bottom:4px}
+.sqrts output{font-family:var(--mono);font-size:40px;font-weight:300;color:var(--ink);letter-spacing:-.02em}
+.sqrts output.dim{color:var(--ink-3)}
+.sqrts span{font-size:15px;color:var(--ink-2);margin-left:4px}
+
+/* ---------- Layout ---------- */
+.cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(330px,400px);gap:14px;align-items:start}
+.col-main,.col-side{display:flex;flex-direction:column;gap:14px;min-width:0}
+.panel{
+  position:relative;background:var(--glass);border:1px solid var(--line);border-radius:16px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.04);
+}
+.panel h2{margin:0;font-size:14px;font-weight:400;color:var(--ink-2)}
+.panel-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:12px 14px 0}
+.panel-head small{color:var(--ink-3);font-size:11px;font-family:var(--mono)}
+
+/* Ring view */
+.ring-panel{overflow:hidden;border-radius:20px;background:#03050b}
+#ringCanvas{display:block;width:100%;aspect-ratio:16/10}
+.banner{
+  position:absolute;left:50%;top:14px;transform:translateX(-50%);
+  min-width:min(420px,86%);max-width:92%;padding:10px 16px;border-radius:12px;
+  background:rgba(8,12,26,.84);border:1px solid var(--line-2);text-align:center;
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+}
+.banner b{display:block;font-family:var(--mono);font-weight:500;font-size:15px;letter-spacing:.04em}
+.banner p{margin:4px 0 0;font-size:13px;color:var(--ink-2)}
+.banner[data-kind="alarm"]{border-color:rgba(255,90,95,.7);box-shadow:0 0 40px rgba(255,90,95,.25)}
+.banner[data-kind="alarm"] b{color:var(--alarm)}
+.banner[data-kind="quench"]{border-color:rgba(255,122,61,.75);box-shadow:0 0 40px rgba(255,122,61,.3)}
+.banner[data-kind="quench"] b{color:var(--quench)}
+.banner[data-kind="warn"]{border-color:rgba(255,181,71,.6)}
+.banner[data-kind="warn"] b{color:var(--warn)}
+.banner[data-kind="info"] b{color:var(--ice)}
+.banner[data-kind="ok"]{border-color:rgba(87,255,154,.5)}
+.banner[data-kind="ok"] b{color:var(--hit)}
+
+/* Controls */
+.controls{padding:14px}
+.sequence{display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) minmax(0,.9fr);gap:8px}
+.step{
+  position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:2px;
+  padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--glass-2);
+  cursor:pointer;text-align:left;transition:border-color .15s,background .15s,opacity .15s;
+}
+.step .n{font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+.step b{font-weight:500;font-size:15px}
+.step small{font-size:11.5px;color:var(--ink-3);line-height:1.3}
+.step:hover{border-color:var(--line-2)}
+.step[aria-disabled="true"]{opacity:.42;cursor:not-allowed}
+.step.done{opacity:.62}
+.step.active{opacity:1}
+.step.next{border-color:rgba(61,139,255,.7);background:rgba(30,60,140,.35);box-shadow:0 0 22px rgba(61,139,255,.25)}
+.step.next .n{color:var(--ice)}
+.step.active{border-color:rgba(169,214,255,.55)}
+.step.active::after{
+  content:"";position:absolute;left:10px;right:10px;bottom:5px;height:2px;border-radius:2px;
+  background:linear-gradient(90deg,transparent,var(--ice),transparent);background-size:200% 100%;
+  animation:sweep 1.2s linear infinite;
+}
+.step.done .n::after{content:" done";color:var(--hit)}
+.step.dump{border-color:rgba(255,90,95,.35)}
+.step.dump b{color:#ff8a8d}
+.step.dump:hover{background:rgba(120,20,30,.3);border-color:rgba(255,90,95,.7)}
+.step.dump.urge{border-color:rgba(255,181,71,.8);box-shadow:0 0 22px rgba(255,181,71,.25)}
+@keyframes sweep{from{background-position:200% 0}to{background-position:-200% 0}}
+.hint{margin:12px 2px 4px;font-size:13.5px;color:var(--ink-2);min-height:1.4em}
+.hint.bad{color:#ff9a9d}
+.hint.warn{color:var(--warn)}
+
+.sliders{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px 18px;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+.ctl{min-width:0}
+.ctl-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.ctl label{font-size:13px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ctl output{font-family:var(--mono);font-size:14px;color:var(--ink);white-space:nowrap}
+.ctl output span{color:var(--ink-3);font-size:11px;margin-left:3px}
+.ctl-note{font-family:var(--mono);font-size:11px;color:var(--ink-3);min-height:1.3em;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ctl-note.bad{color:#ff8a8d}
+.ctl-note.warn{color:var(--warn)}
+.ctl-note.ok{color:#7fe0ad}
+input[type=range]{
+  -webkit-appearance:none;appearance:none;width:100%;height:26px;background:transparent;margin:4px 0 0;cursor:pointer;
+}
+input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:4px;background:linear-gradient(90deg,var(--neon) var(--p,50%),rgba(130,160,230,.18) var(--p,50%))}
+input[type=range]::-moz-range-track{height:4px;border-radius:4px;background:rgba(130,160,230,.18)}
+input[type=range]::-moz-range-progress{height:4px;border-radius:4px;background:var(--neon)}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:16px;height:16px;margin-top:-6px;border-radius:50%;
+  background:#dfeaff;border:2px solid var(--neon);box-shadow:0 0 10px rgba(61,139,255,.8);
+}
+input[type=range]::-moz-range-thumb{width:13px;height:13px;border-radius:50%;background:#dfeaff;border:2px solid var(--neon);box-shadow:0 0 10px rgba(61,139,255,.8)}
+.ctl[data-key="B"].hot input[type=range]::-webkit-slider-thumb{border-color:var(--quench);box-shadow:0 0 12px rgba(255,122,61,.9)}
+.presets{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+.ghost{
+  padding:8px 14px;border-radius:999px;border:1px solid var(--line-2);background:transparent;
+  font-size:13px;color:var(--ink-2);cursor:pointer;
+}
+.ghost:hover{color:var(--ink);border-color:var(--ice)}
+.kbd{margin-left:auto;align-self:center;font-size:12px;color:var(--ink-3)}
+.kbd kbd{font-family:var(--mono);font-size:11px;padding:1px 5px;border:1px solid var(--line-2);border-radius:4px;color:var(--ink-2)}
+
+/* Readouts */
+.readout{padding-bottom:12px}
+.lumi-hero{padding:12px 14px 4px}
+.lumi-hero small{display:block;font-size:12px;color:var(--ink-3)}
+.lumi-hero output{display:block;font-family:var(--mono);font-size:30px;letter-spacing:-.01em;margin-top:2px}
+.lumi-hero output span{font-size:13px;color:var(--ink-2);margin-left:6px}
+.lumi-hero output.dim{color:var(--ink-3)}
+.lumi-hero p{margin:3px 0 0;font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:1px;margin:10px 14px 0;background:var(--line);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.tile{background:rgba(6,10,22,.86);padding:9px 11px;min-width:0}
+.tile small{display:block;font-size:11.5px;color:var(--ink-3)}
+.tile output{display:block;font-family:var(--mono);font-size:16px;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile p{margin:2px 0 0;font-family:var(--mono);font-size:10.5px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile.bad output{color:#ff8a8d}
+.tile.warn output{color:var(--warn)}
+.tile.ok output{color:#9ff5c6}
+
+.scope-panel canvas{display:block;width:100%;aspect-ratio:2/1.05;margin-top:6px;border-radius:0 0 16px 16px}
+.event-panel canvas{display:block;width:100%;aspect-ratio:1/1;margin-top:4px}
+.evt-meta{padding:0 14px 12px;font-family:var(--mono);font-size:11.5px;color:var(--ink-2);line-height:1.55}
+.evt-meta .dim{color:var(--ink-3)}
+.log-panel{padding-bottom:10px}
+#log{list-style:none;margin:8px 0 0;padding:0 14px;font-family:var(--mono);font-size:11.5px;line-height:1.6;max-height:168px;overflow:auto}
+#log li{display:grid;grid-template-columns:auto 1fr;gap:10px;color:var(--ink-2)}
+#log time{color:var(--ink-3)}
+#log li.alarm{color:#ff8a8d}
+#log li.warn{color:var(--warn)}
+#log li.ok{color:#9ff5c6}
+
+.reference{margin-top:14px;padding:4px 16px}
+.reference summary{cursor:pointer;padding:10px 0;font-size:14px;color:var(--ink-2)}
+.reference .body{columns:2 380px;column-gap:36px;padding:4px 0 16px;font-size:13px;color:var(--ink-2);line-height:1.6}
+.reference p{margin:0 0 10px;break-inside:avoid}
+.reference code{font-family:var(--mono);font-size:12px;color:var(--ice)}
+footer{margin-top:14px;color:var(--ink-3);font-size:12px;text-align:center}
+
+/* ---------- Responsive ---------- */
+@media (max-width:1180px){
+  .sliders{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:920px){
+  .page1{grid-template-columns:1fr auto}
+  .status{grid-column:1/-1;justify-content:flex-start;order:3}
+  .cols{display:flex;flex-direction:column}
+  .col-main,.col-side{display:contents}
+  .ring-panel{order:1}.controls{order:2}.readout{order:3}.scope-panel{order:4}.event-panel{order:5}.log-panel{order:6}
+  .cols>*>*{width:100%}
+}
+@media (max-width:600px){
+  .app{padding:10px 10px 22px}
+  .brand h1{font-size:21px}
+  .brand span{display:none}
+  .sqrts output{font-size:30px}
+  .status{gap:14px}
+  #ringCanvas{aspect-ratio:1/1}
+  .sequence{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .sequence .step.dump{grid-column:1/-1;flex-direction:row;align-items:baseline;gap:10px;justify-content:center}
+  .step{padding:9px 8px}
+  .step small{display:none}
+  .sliders{grid-template-columns:1fr;gap:10px}
+  .kbd{display:none}
+  .banner{top:10px}
+  .banner b{font-size:13px}
+  .banner p{font-size:12px}
+}
+@media (prefers-reduced-motion:reduce){
+  .step.active::after{animation:none}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="page1">
+    <div class="brand"><h1>Co<b>LL</b>iDr</h1><span>Hadron collider simulator, LHC scale</span></div>
+    <div class="status" aria-label="Machine status">
+      <div><small>Fill</small><output id="hFill">0</output></div>
+      <div><small>Beam mode</small><span class="mode" id="hMode" data-tone="idle"><i></i><span id="hModeText">No beam</span></span></div>
+      <div><small>Energy per beam</small><output id="hEnergy">—</output></div>
+      <div><small>Sim clock</small><output id="hClock">00:00:00</output></div>
+    </div>
+    <div class="sqrts"><small>Centre-of-mass energy √s</small><output id="hSqrtS" class="dim">—</output><span>TeV</span></div>
+  </header>
+
+  <div class="cols">
+    <div class="col-main">
+      <section class="panel ring-panel" aria-label="Collider ring view">
+        <canvas id="ringCanvas" role="img" aria-label="Animated collider ring with two counter-rotating proton beams"></canvas>
+        <div class="banner" id="banner" role="status" aria-live="polite" hidden><b id="bannerTitle"></b><p id="bannerText"></p></div>
+      </section>
+
+      <section class="panel controls" aria-label="Machine controls">
+        <div class="sequence" role="group" aria-label="Operation sequence">
+          <button class="step" data-act="inject"><span class="n">1</span><b>Inject</b><small>Fill the ring at 450 GeV</small></button>
+          <button class="step" data-act="ramp"><span class="n">2</span><b>Ramp</b><small>Raise energy and field</small></button>
+          <button class="step" data-act="squeeze"><span class="n">3</span><b>Squeeze</b><small>Focus β* at the IPs</small></button>
+          <button class="step" data-act="collide"><span class="n">4</span><b>Collide</b><small>Declare stable beams</small></button>
+          <button class="step dump" data-act="dump"><span class="n">Abort</span><b>Dump</b><small>Extract both beams</small></button>
+        </div>
+        <p class="hint" id="hint" aria-live="polite"></p>
+        <div class="sliders" id="sliders"></div>
+        <div class="presets">
+          <button class="ghost" id="presetNominal">Load LHC design values</button>
+          <span class="kbd">Keys <kbd>I</kbd> <kbd>R</kbd> <kbd>S</kbd> <kbd>C</kbd> <kbd>D</kbd></span>
+        </div>
+      </section>
+    </div>
+
+    <div class="col-side">
+      <section class="panel readout" aria-label="Live readout">
+        <div class="lumi-hero">
+          <small id="lumiLabel">Luminosity at IP1 and IP5</small>
+          <output id="lumiValue" class="dim">—</output>
+          <p id="lumiSub"></p>
+        </div>
+        <div class="tiles" id="tiles"></div>
+      </section>
+
+      <section class="panel scope-panel" aria-label="Luminosity oscilloscope">
+        <div class="panel-head"><h2>Luminometer</h2><small id="scopeMeta"></small></div>
+        <canvas id="scopeCanvas"></canvas>
+      </section>
+
+      <section class="panel event-panel" aria-label="Detector event display">
+        <div class="panel-head"><h2>Event display, IP1</h2><small id="evtRate"></small></div>
+        <canvas id="eventCanvas"></canvas>
+        <div class="evt-meta" id="evtMeta"><span class="dim">No collisions yet. Complete the sequence and declare stable beams.</span></div>
+      </section>
+
+      <section class="panel log-panel" aria-label="Machine log">
+        <div class="panel-head"><h2>Machine log</h2><small>sim time</small></div>
+        <ol id="log"></ol>
+      </section>
+    </div>
+  </div>
+
+  <details class="panel reference">
+    <summary>Physics reference: every number on screen comes from these</summary>
+    <div class="body" id="refBody"></div>
+  </details>
+  <footer>No backend, no tracking. Formulas and constants are documented in the source.</footer>
+</div>
+
+<script>
+'use strict';
+
+/* =====================================================================
+   PHYSICS MODULE
+   Pure functions + constants. No DOM. Units: GeV, T, m, s unless noted.
+   ===================================================================== */
+/* ===== PHYSICS-BEGIN ===== */
+const Physics = (() => {
+  const K = Object.freeze({
+    CIRCUMFERENCE_M: 26659,        // LHC circumference, 26.7 km
+    RHO_M: 2804,                   // dipole bending radius
+    F_REV_HZ: 11245,               // revolution frequency, 11.245 kHz
+    M_P_GEV: 0.938272,             // proton rest mass
+    M_P_OVER_M_E: 1836.15267,      // proton / electron mass ratio (the "1836")
+    E_CHARGE_C: 1.602176634e-19,   // elementary charge
+    RIGIDITY: 0.299792458,         // p[GeV/c] = 0.2998 · B[T] · ρ[m]   (the "0.3" is c/1e9)
+    SR_CONST_KEV: 88.5,            // U0[keV] = 88.5 · E^4[GeV] / ρ[m]  (electrons)
+    E_INJ_GEV: 450,                // SPS → LHC injection energy
+    B_DESIGN_T: 8.33,              // LHC design dipole field
+    B_QUENCH_T: 9.0,               // field at which the simulated dipoles always quench
+    SIGMA_Z_M: 0.075,              // rms bunch length
+    SQRT_S_REF_TEV: 14,            // reference √s for the cross sections below
+    SIGMA_INEL_REF_MB: 80,         // σ_inel(14 TeV) ≈ 80 mb
+    SIGMA_TOT_REF_MB: 110,         // σ_tot(14 TeV) ≈ 110 mb (TOTEM-scale), used for burn-off
+    XS_LOG_SLOPE: 0.12,            // gentle √s scaling: σ(√s) = σ_ref · (1 + 0.12 ln(√s/14 TeV))
+    MB_TO_CM2: 1e-27,
+    TAU_GAS_H: 100,                // residual-gas scattering lifetime
+    N_HIGH_LUMI_IPS: 2,            // IP1 + IP5 at full luminosity drive burn-off
+    BUCKET_SLOTS: 3564,            // 25 ns bunch slots per turn
+    ABORT_GAP_SLOTS: 119,          // ≈3 µs gap for the dump kicker rise time
+    TRAIN_LEN: 72, TRAIN_GAP: 8, BATCH_TRAINS: 4, BATCH_GAP: 38,
+    SPS_CYCLE_S: 21.6,             // one SPS transfer per ring per cycle
+    BUNCHES_PER_TRANSFER: 288,
+    BETA_INJ_M: 11,                // β* of the injection optics at IP1/5
+    DBDT_T_PER_S: 0.0067,          // main dipole ramp rate (≈10 A/s on the 11.85 kA circuit)
+    RAMPDOWN_FACTOR: 2,            // ramp-down runs at twice the ramp-up rate
+    SQUEEZE_LN_RATE: Math.log(11 / 0.55) / 900, // 11 m → 55 cm in 15 min
+    QUENCH_HAZARD_MAX_PER_S: 0.15, // training-quench hazard just below 9 T (real-time seconds)
+    QUENCH_RECOVERY_S: 20,         // cryogenic recovery, compressed to 20 real seconds
+    RF_MHZ: 400.79,                // RF frequency
+    N_DIPOLES: 1232,
+    SOLENOID_T: 3.8,               // detector solenoid (CMS-like)
+    RETURN_YOKE_T: -1.8,           // return-yoke field seen by muons
+    DNDETA_13TEV: 6.46,            // charged multiplicity dN/dη at η≈0, 13 TeV
+    DNDETA_EXP: 0.103,             // dN/dη ∝ s^0.103
+  });
+
+  /** p = √(E² − m²) */
+  const momentum = E => Math.sqrt(Math.max(E * E - K.M_P_GEV * K.M_P_GEV, 0));
+  const energyFromMomentum = p => Math.sqrt(p * p + K.M_P_GEV * K.M_P_GEV);
+  /** Magnetic rigidity: p[GeV/c] = 0.3 · B[T] · ρ[m]  ⇒  B = p / (0.3 ρ) */
+  const requiredField = E => momentum(E) / (K.RIGIDITY * K.RHO_M);
+  const maxEnergyForField = B => energyFromMomentum(K.RIGIDITY * B * K.RHO_M);
+  /** Lorentz factor γ = E / m_p */
+  const gamma = E => E / K.M_P_GEV;
+  /** √s = 2E for symmetric head-on beams (TeV) */
+  const sqrtS_TeV = E => 2 * E / 1000;
+  const xsScale = sqrtS => Math.max(0.3, 1 + K.XS_LOG_SLOPE * Math.log(Math.max(sqrtS, 0.1) / K.SQRT_S_REF_TEV));
+  const sigmaInel_mb = sqrtS => K.SIGMA_INEL_REF_MB * xsScale(sqrtS);
+  const sigmaTot_mb = sqrtS => K.SIGMA_TOT_REF_MB * xsScale(sqrtS);
+
+  /**
+   * Luminosity per IP:
+   *   L = N² n_b f_rev γ / (4π ε_n β*) · F
+   *   F = 1/√(1 + (θ_c σ_z / 2σ*)²),   σ* = √(ε_n β* / γ)
+   * Inputs in SI (ε_n in m·rad, β* in m, θ_c in rad). Returns L in cm⁻² s⁻¹.
+   */
+  function luminosity({ N, nb, E, epsn, beta, theta }) {
+    const g = gamma(E);
+    const sigmaStar = Math.sqrt(epsn * beta / g);
+    const piwinski = theta * K.SIGMA_Z_M / (2 * sigmaStar);
+    const F = 1 / Math.sqrt(1 + piwinski * piwinski);
+    if (!(N > 0) || !(nb > 0)) return { L: 0, F, sigmaStar, gamma: g, piwinski };
+    const L_m2 = (N * N * nb * K.F_REV_HZ * g) / (4 * Math.PI * epsn * beta) * F;
+    return { L: L_m2 * 1e-4, F, sigmaStar, gamma: g, piwinski };
+  }
+
+  /** I_beam = N · n_b · e · f_rev  (A) */
+  const beamCurrent = (N, nb) => N * nb * K.E_CHARGE_C * K.F_REV_HZ;
+  /** U0[keV] = 88.5 E⁴ / ρ / (m_p/m_e)⁴ — proton synchrotron loss per turn */
+  const srLossPerTurn_keV = E => K.SR_CONST_KEV * Math.pow(E, 4) / K.RHO_M / Math.pow(K.M_P_OVER_M_E, 4);
+  /** P = U0 · I_beam  (eV × A = W) */
+  const srPower_W = (E, N, nb) => srLossPerTurn_keV(E) * 1e3 * beamCurrent(N, nb);
+  /** Stored energy per beam = N n_b E e */
+  const storedEnergy_J = (E, N, nb) => N * nb * E * 1e9 * K.E_CHARGE_C;
+  /** R = L · σ_inel */
+  const eventRate = (L, sqrtS) => L * sigmaInel_mb(sqrtS) * K.MB_TO_CM2;
+  /** Pile-up μ = L σ_inel / (n_b f_rev) — mean interactions per bunch crossing */
+  const pileup = (L, sqrtS, nb) => nb > 0 ? eventRate(L, sqrtS) / (nb * K.F_REV_HZ) : 0;
+  /** Burn-off lifetime τ = N_tot / (k L σ_tot) with k high-luminosity IPs */
+  const burnoffLifetime_s = (Ntot, L, sqrtS) =>
+    L > 0 ? Ntot / (K.N_HIGH_LUMI_IPS * L * sigmaTot_mb(sqrtS) * K.MB_TO_CM2) : Infinity;
+  /** 1/τ = 1/τ_burn + 1/τ_gas */
+  const combinedLifetime_s = tauBurn => 1 / (1 / tauBurn + 1 / (K.TAU_GAS_H * 3600));
+  /** dN_tot/dt per beam = −k L σ_tot − N_tot/τ_gas  (protons/s) */
+  const protonLossRate = (Ntot, L, sqrtS) =>
+    K.N_HIGH_LUMI_IPS * L * sigmaTot_mb(sqrtS) * K.MB_TO_CM2 + Ntot / (K.TAU_GAS_H * 3600);
+  /** Longitudinal luminous region σ_lum = σ_z/√2 · F */
+  const luminousRegion_m = F => K.SIGMA_Z_M / Math.SQRT2 * F;
+  /** Injection: one SPS transfer of ≤288 bunches per ring per SPS cycle */
+  const injectionTime_s = nb => Math.ceil(nb / K.BUNCHES_PER_TRANSFER) * 2 * K.SPS_CYCLE_S;
+  /** Quench hazard per real second: 0 up to 8.33 T, rising quadratically toward 9 T */
+  function quenchHazard(B) {
+    if (B <= K.B_DESIGN_T) return 0;
+    const x = Math.min(1, (B - K.B_DESIGN_T) / (K.B_QUENCH_T - K.B_DESIGN_T));
+    return K.QUENCH_HAZARD_MAX_PER_S * x * x;
+  }
+  /** Charged multiplicity dN/dη ∝ s^0.103, anchored at 6.46 for 13 TeV */
+  const dNchdEta = sqrtS => K.DNDETA_13TEV * Math.pow((sqrtS / 13) ** 2, K.DNDETA_EXP);
+
+  /** 25 ns filling scheme: trains of 72, 8-slot gaps, 38-slot SPS batch gaps, 119-slot abort gap */
+  const patternCache = new Map();
+  function fillingPattern(nbIn) {
+    const nb = Math.max(1, Math.min(2808, Math.round(nbIn)));
+    if (patternCache.has(nb)) return patternCache.get(nb);
+    const usable = K.BUCKET_SLOTS - K.ABORT_GAP_SLOTS;
+    const slots = new Int32Array(nb);
+    if (nb <= 48) {
+      for (let i = 0; i < nb; i++) slots[i] = Math.round(i * usable / nb);
+    } else {
+      const nTrains = Math.ceil(nb / K.TRAIN_LEN);
+      const nGaps = nTrains - 1;
+      const nBatchGaps = Math.floor(nGaps / K.BATCH_TRAINS);
+      const fits = nb + nGaps * K.TRAIN_GAP + nBatchGaps * (K.BATCH_GAP - K.TRAIN_GAP) <= usable;
+      let slot = 0, placed = 0;
+      for (let t = 0; t < nTrains; t++) {
+        if (t > 0) slot += (t % K.BATCH_TRAINS === 0 && fits) ? K.BATCH_GAP : K.TRAIN_GAP;
+        for (let b = 0; b < K.TRAIN_LEN && placed < nb; b++) slots[placed++] = slot++;
+      }
+    }
+    patternCache.set(nb, slots);
+    return slots;
+  }
+
+  return Object.freeze({
+    K, momentum, energyFromMomentum, requiredField, maxEnergyForField, gamma, sqrtS_TeV,
+    sigmaInel_mb, sigmaTot_mb, luminosity, beamCurrent, srLossPerTurn_keV, srPower_W,
+    storedEnergy_J, eventRate, pileup, burnoffLifetime_s, combinedLifetime_s, protonLossRate,
+    luminousRegion_m, injectionTime_s, quenchHazard, dNchdEta, fillingPattern,
+  });
+})();
+/* ===== PHYSICS-END ===== */
+
+/* =====================================================================
+   MACHINE (simulation state + operation sequence). No DOM.
+   S = settings from the sliders: { E (TeV), B (T), N (1e11), nb, eps (µm·rad),
+       beta (cm), theta (µrad), speed (×) }
+   ===================================================================== */
+/* ===== SIM-BEGIN ===== */
+const Machine = (() => {
+  const P = Physics, K = Physics.K;
+  const B_INJ = P.requiredField(K.E_INJ_GEV);
+  const BEAM_MODES = new Set(['INJECTING', 'INJECTED', 'RAMPING', 'FLATTOP', 'SQUEEZING', 'ADJUST', 'STABLE']);
+  const POWERED = new Set(['NOBEAM', 'INJECTING', 'INJECTED', 'RAMPING', 'FLATTOP', 'SQUEEZING', 'ADJUST', 'STABLE', 'DUMPING', 'RAMPDOWN', 'RECOVERY']);
+
+  const st = {
+    mode: 'NOBEAM', simTime: 0, fillStart: 0, fills: 0,
+    E: K.E_INJ_GEV, B: B_INJ, beta: K.BETA_INJ_M,
+    survival: 0, injFrac: 0,
+    intLumiFill: 0, intLumiTotal: 0, eventsTotal: 0, peakL: 0,
+    quenchTimer: 0, quenchB: 0, dumpTimer: 0, lowWarned: false,
+  };
+  const queue = [];
+  const note = (type, data = {}) => queue.push(Object.assign({ type, t: st.simTime }, data));
+  const log = (level, text) => note('log', { level, text });
+  const hasBeam = () => BEAM_MODES.has(st.mode) && st.survival > 0;
+  const slew = (x, target, maxStep) => x < target ? Math.min(target, x + maxStep) : Math.max(target, x - maxStep);
+  const f2 = v => v.toFixed(2);
+
+  function live(S) {
+    const nb = st.mode === 'INJECTING' ? Math.max(1, Math.ceil(S.nb * st.injFrac)) : S.nb;
+    return {
+      N: S.N * 1e11 * st.survival, nb, E: st.E,
+      epsn: S.eps * 1e-6, beta: st.beta, theta: S.theta * 1e-6,
+    };
+  }
+
+  /* ---- operator actions ---- */
+  function can(act, S) {
+    const m = st.mode, Eset = S.E * 1000;
+    const busy = { INJECTING: 'Injection in progress.', RAMPING: 'Ramp in progress.', SQUEEZING: 'Squeeze in progress.',
+      DUMPING: 'Beam dump in progress.', RAMPDOWN: 'Magnets ramping down to injection field.',
+      QUENCH: `Magnet quench: cryogenic recovery, ${Math.ceil(st.quenchTimer)} s left.`,
+      RECOVERY: 'Re-energising magnets after the quench.' };
+    switch (act) {
+      case 'inject':
+        if (m === 'NOBEAM') return { ok: true };
+        if (busy[m]) return { ok: false, why: busy[m] };
+        return { ok: false, why: 'Beam already circulating. Dump it before injecting a new fill.' };
+      case 'ramp':
+        if (m === 'INJECTED') return { ok: true };
+        if (m === 'FLATTOP') {
+          if (Eset > st.E + 0.5) return { ok: true };
+          if (Eset < st.E - 0.5) return { ok: false, why: 'Ramping down with beam is not supported. Dump and refill for a lower energy.' };
+          return { ok: false, why: 'Already at the energy setpoint. Raise the energy slider to ramp further.' };
+        }
+        if (m === 'NOBEAM') return { ok: false, why: 'Inject first: there is no beam to ramp.' };
+        if (m === 'ADJUST' || m === 'STABLE') return { ok: false, why: 'Optics are squeezed, so energy is fixed for this fill.' };
+        return { ok: false, why: busy[m] || 'Not available now.' };
+      case 'squeeze':
+        if (m === 'FLATTOP') return { ok: true };
+        if (m === 'NOBEAM') return { ok: false, why: 'Inject and ramp before squeezing.' };
+        if (m === 'INJECTING' || m === 'INJECTED' || m === 'RAMPING') return { ok: false, why: 'Squeeze happens at flat top. Ramp first.' };
+        if (m === 'ADJUST' || m === 'STABLE') return { ok: false, why: 'Already squeezed. β* now follows its slider live.' };
+        return { ok: false, why: busy[m] || 'Not available now.' };
+      case 'collide': {
+        if (m === 'ADJUST') return { ok: true };
+        if (m === 'STABLE') return { ok: false, why: 'Already in stable beams.' };
+        const missing = [];
+        if (!['INJECTED', 'RAMPING', 'FLATTOP', 'SQUEEZING'].includes(m)) missing.push('Inject');
+        if (!['FLATTOP', 'SQUEEZING'].includes(m)) missing.push('Ramp');
+        missing.push('Squeeze');
+        if (busy[m] && !['INJECTING', 'RAMPING', 'SQUEEZING'].includes(m)) return { ok: false, why: busy[m] };
+        return { ok: false, why: `Stable beams needs ${missing.join(', then ')} first.` };
+      }
+      case 'dump':
+        return { ok: true, idle: !hasBeam() };
+    }
+    return { ok: false, why: '' };
+  }
+
+  function act(name, S) {
+    lastS = S;
+    const c = can(name, S);
+    if (!c.ok) return c;
+    if (name === 'inject') inject(S);
+    else if (name === 'ramp') { st.mode = 'RAMPING'; log('info', `Ramp started toward ${f2(S.E)} TeV (needs ${f2(P.requiredField(S.E * 1000))} T).`); }
+    else if (name === 'squeeze') { st.mode = 'SQUEEZING'; log('info', `Squeeze started: β* 11 m → ${S.beta} cm.`); }
+    else if (name === 'collide') {
+      st.mode = 'STABLE'; st.lowWarned = false;
+      log('ok', 'Stable beams declared. Beams brought into collision.');
+      note('banner', { kind: 'ok', title: 'STABLE BEAMS', text: 'Collisions at IP1, IP2, IP5 and IP8. Luminosity is accruing.', dur: 3.5 });
+    } else if (name === 'dump') dump('operator request', false);
+    return c;
+  }
+
+  function inject(S) {
+    st.fills += 1;
+    if (S.B < B_INJ - 1e-9) {
+      log('alarm', `Fill ${st.fills}: injection failed. Dipoles at ${f2(S.B)} T cannot hold 450 GeV (needs ${f2(B_INJ)} T).`);
+      note('lost', { reason: 'field below injection requirement' });
+      note('banner', { kind: 'alarm', title: 'BEAM LOST', text: `450 GeV needs ${f2(B_INJ)} T. Raise the dipole field and re-inject.`, dur: 5 });
+      return;
+    }
+    Object.assign(st, { mode: 'INJECTING', injFrac: 0, survival: 1, E: K.E_INJ_GEV, B: B_INJ, beta: K.BETA_INJ_M,
+      fillStart: st.simTime, intLumiFill: 0, peakL: 0, lowWarned: false });
+    log('info', `Fill ${st.fills}: injection started, ${S.nb} bunches per beam from the SPS.`);
+  }
+
+  function beamLost(reason, detail) {
+    log('alarm', `Beam lost: ${reason}.`);
+    note('lost', { reason });
+    note('banner', { kind: 'alarm', title: 'BEAM LOST', text: detail || `${reason}. Re-inject to continue.`, dur: 6 });
+    st.survival = 0; st.injFrac = 0;
+    st.mode = st.B > B_INJ + 1e-4 ? 'RAMPDOWN' : 'NOBEAM';
+    if (st.mode === 'NOBEAM') { st.E = K.E_INJ_GEV; st.beta = K.BETA_INJ_M; }
+  }
+
+  function dump(reason, auto) {
+    if (!hasBeam()) { log('info', 'Dump requested with no beam in the machine.'); return; }
+    const MJ = P.storedEnergy_J(st.E, live(lastS).N, live(lastS).nb) / 1e6;
+    log(auto ? 'warn' : 'info', `Beam dump (${reason}): ${MJ.toFixed(MJ < 10 ? 2 : 0)} MJ per beam extracted to the dump blocks.`);
+    note('dump', { MJ, auto });
+    if (!auto) note('banner', { kind: 'info', title: 'BEAM DUMPED', text: `${MJ.toFixed(MJ < 10 ? 2 : 0)} MJ per beam swept onto the dump blocks. Re-inject when the magnets reach 450 GeV.`, dur: 4 });
+    st.survival = 0; st.injFrac = 0; st.mode = 'DUMPING'; st.dumpTimer = 1.4;
+  }
+
+  function quench(cause) {
+    st.quenchB = st.B;
+    if (hasBeam()) dump('quench interlock', true);
+    st.mode = 'QUENCH'; st.quenchTimer = K.QUENCH_RECOVERY_S;
+    log('alarm', `Dipole quench at ${f2(st.quenchB)} T (${cause}). Energy extraction fired; field collapsing.`);
+    note('quench', { B: st.quenchB });
+  }
+
+  /* ---- time evolution (sim seconds) ---- */
+  function evolve(h, S) {
+    const Eset = S.E * 1000;
+    switch (st.mode) {
+      case 'INJECTING':
+        st.injFrac += h / P.injectionTime_s(S.nb);
+        if (S.B < B_INJ - 1e-9) return beamLost('dipole field dropped below injection requirement', `Dipoles at ${f2(S.B)} T cannot hold 450 GeV.`);
+        if (st.injFrac >= 1) {
+          st.injFrac = 1; st.mode = 'INJECTED';
+          log('ok', `Injection complete: ${S.nb} bunches per beam at 450 GeV.`);
+        }
+        break;
+      case 'INJECTED':
+        if (S.B < B_INJ - 1e-9) return beamLost('dipole field dropped below injection requirement', `Dipoles at ${f2(S.B)} T cannot hold 450 GeV.`);
+        break;
+      case 'RAMPING':
+        if (st.E < Eset - 1e-6) {
+          // Energy tracks the dipole ramp: dp/dt = 0.3 ρ dB/dt
+          const p = P.momentum(st.E) + K.RIGIDITY * K.RHO_M * K.DBDT_T_PER_S * h;
+          st.E = Math.min(Eset, P.energyFromMomentum(p));
+          st.B = P.requiredField(st.E);
+          if (st.B > S.B + 1e-9) {
+            return beamLost('ramp exceeded the dipole field limit',
+              `${(st.E / 1000).toFixed(2)} TeV needs ${f2(st.B)} T but the dipoles are capped at ${f2(S.B)} T.`);
+          }
+        } else {
+          st.E = Math.min(st.E, Eset);
+          st.B = slew(st.B, S.B, K.DBDT_T_PER_S * h);
+          if (Math.abs(st.B - S.B) < 1e-6) {
+            st.mode = 'FLATTOP';
+            log('ok', `Flat top: ${(st.E / 1000).toFixed(2)} TeV per beam, dipoles at ${f2(st.B)} T.`);
+          }
+        }
+        break;
+      case 'FLATTOP': case 'SQUEEZING': case 'ADJUST': case 'STABLE': {
+        st.B = slew(st.B, S.B, K.DBDT_T_PER_S * h);
+        const need = P.requiredField(st.E);
+        if (S.B < need - 1e-6) {
+          return beamLost('dipole field below what the beam energy needs',
+            `${(st.E / 1000).toFixed(2)} TeV needs ${f2(need)} T; dipoles set to ${f2(S.B)} T.`);
+        }
+        if (st.mode === 'SQUEEZING') {
+          const target = S.beta / 100;
+          st.beta = Math.max(target, Math.exp(Math.log(st.beta) - K.SQUEEZE_LN_RATE * h));
+          if (st.beta <= target + 1e-9) {
+            st.beta = target; st.mode = 'ADJUST';
+            log('ok', `Squeeze complete: β* = ${S.beta} cm. Ready for stable beams.`);
+          }
+        } else if (st.mode === 'ADJUST' || st.mode === 'STABLE') {
+          st.beta = S.beta / 100; // β* levelling: follows the slider live
+        }
+        break;
+      }
+      case 'RAMPDOWN':
+        st.B = slew(st.B, B_INJ, K.DBDT_T_PER_S * K.RAMPDOWN_FACTOR * h);
+        if (Math.abs(st.B - B_INJ) < 1e-6) {
+          st.mode = 'NOBEAM'; st.E = K.E_INJ_GEV; st.beta = K.BETA_INJ_M;
+          log('info', 'Magnets at injection field. Ready to inject.');
+        }
+        break;
+      case 'RECOVERY':
+        st.B = slew(st.B, B_INJ, K.DBDT_T_PER_S * h);
+        if (Math.abs(st.B - B_INJ) < 1e-6) {
+          st.mode = 'NOBEAM'; st.E = K.E_INJ_GEV; st.beta = K.BETA_INJ_M;
+          log('ok', 'Magnets recovered and back at injection field. Ready to inject.');
+        }
+        break;
+    }
+
+    // Beam population
+    if (BEAM_MODES.has(st.mode) && st.survival > 0) {
+      const tauGas = K.TAU_GAS_H * 3600;
+      if (st.mode === 'STABLE') {
+        const lv = live(S);
+        const sq = P.sqrtS_TeV(st.E);
+        const L = P.luminosity(lv).L;
+        const Ntot = lv.N * lv.nb;
+        const dN = P.protonLossRate(Ntot, L, sq) * h;           // burn-off + gas
+        st.survival = Math.max(0, st.survival - dN / (S.N * 1e11 * lv.nb));
+        st.intLumiFill += L * h; st.intLumiTotal += L * h;      // ∫L dt (cm⁻²)
+        st.eventsTotal += P.eventRate(L, sq) * h;              // ∫R dt
+        st.peakL = Math.max(st.peakL, L);
+      } else {
+        st.survival *= Math.exp(-h / tauGas);
+      }
+      if (st.survival < 1e-4) { st.survival = 1e-4; dump('beam burned off', true); }
+    }
+  }
+
+  let lastS = null;
+  function step(dtReal, S) {
+    lastS = S;
+    if (st.mode === 'DUMPING') {
+      st.dumpTimer -= dtReal;
+      if (st.dumpTimer <= 0) {
+        st.mode = st.B > B_INJ + 1e-4 ? 'RAMPDOWN' : 'NOBEAM';
+        if (st.mode === 'NOBEAM') { st.E = K.E_INJ_GEV; st.beta = K.BETA_INJ_M; }
+      }
+    }
+    if (st.mode === 'QUENCH') {
+      st.B *= Math.exp(-dtReal / 3);                         // field decays through the energy-extraction resistors (compressed)
+      st.quenchTimer -= dtReal;
+      if (st.quenchTimer <= 0) { st.mode = 'RECOVERY'; log('info', 'Cryogenic recovery complete. Re-energising magnets.'); }
+    }
+    let rem = dtReal * S.speed;
+    while (rem > 0) {
+      const h = Math.min(rem, 20);
+      evolve(h, S);
+      rem -= h;
+    }
+    st.simTime += dtReal * S.speed;
+
+    // Quench check (hazard is per real second so it is independent of sim speed)
+    if (POWERED.has(st.mode)) {
+      if (st.B >= K.B_QUENCH_T - 1e-6) quench(`reached ${K.B_QUENCH_T} T`);
+      else {
+        const lam = P.quenchHazard(st.B);
+        if (lam > 0 && Math.random() < 1 - Math.exp(-lam * dtReal)) quench('training quench above design field');
+      }
+    }
+    if (st.mode === 'STABLE' && st.survival < 0.1 && !st.lowWarned) {
+      st.lowWarned = true;
+      log('warn', 'Intensity below 10% of injected. Dump and refill recommended.');
+    }
+  }
+
+  function derive(S) {
+    const beam = hasBeam();
+    const lv = live(S);
+    const sq = P.sqrtS_TeV(st.E);
+    const colliding = st.mode === 'STABLE' && beam;
+    const lum = P.luminosity(lv);
+    const L = colliding ? lum.L : 0;
+    const Eset = S.E * 1000;
+    const projIn = { N: S.N * 1e11, nb: S.nb, E: Eset, epsn: S.eps * 1e-6, beta: S.beta / 100, theta: S.theta * 1e-6 };
+    const proj = P.luminosity(projIn);
+    const sqSet = P.sqrtS_TeV(Eset);
+    const Ntot = beam ? lv.N * lv.nb : 0;
+    const tauBurn = colliding ? P.burnoffLifetime_s(Ntot, L, sq) : Infinity;
+    return {
+      mode: st.mode, beam, colliding, simTime: st.simTime, fillTime: st.simTime - st.fillStart, fills: st.fills,
+      E: st.E, Eset, B: st.B, Bset: S.B, beta: st.beta,
+      BreqBeam: P.requiredField(st.E), BreqSet: P.requiredField(Eset), Binj: B_INJ,
+      EmaxForB: P.maxEnergyForField(S.B),
+      survival: st.survival, injFrac: st.injFrac,
+      N: lv.N, nb: lv.nb, nbSet: S.nb, sqrtS: sq, sqrtSset: sqSet,
+      gamma: lum.gamma, F: lum.F, sigmaStar: lum.sigmaStar, piwinski: lum.piwinski,
+      L, R: P.eventRate(L, sq), mu: P.pileup(L, sq, lv.nb),
+      projL: proj.L, projF: proj.F, projSigmaStar: proj.sigmaStar,
+      projR: P.eventRate(proj.L, sqSet), projMu: P.pileup(proj.L, sqSet, S.nb),
+      sigmaInel: P.sigmaInel_mb(beam ? sq : sqSet), sigmaTot: P.sigmaTot_mb(beam ? sq : sqSet),
+      I: beam ? P.beamCurrent(lv.N, lv.nb) : 0,
+      Iset: P.beamCurrent(S.N * 1e11, S.nb),
+      U0: P.srLossPerTurn_keV(beam ? st.E : Eset),
+      Psr: beam ? P.srPower_W(st.E, lv.N, lv.nb) : 0,
+      PsrSet: P.srPower_W(Eset, S.N * 1e11, S.nb),
+      Estored: beam ? P.storedEnergy_J(st.E, lv.N, lv.nb) : 0,
+      EstoredSet: P.storedEnergy_J(Eset, S.N * 1e11, S.nb),
+      tauBurn, tau: P.combinedLifetime_s(tauBurn), tauGas: K.TAU_GAS_H * 3600,
+      intLumiFill: st.intLumiFill, intLumiTotal: st.intLumiTotal, eventsTotal: st.eventsTotal, peakL: st.peakL,
+      quenchRisk: P.quenchHazard(st.B), quenchTimer: st.quenchTimer, quenchB: st.quenchB,
+      lumRegion: P.luminousRegion_m(lum.F),
+    };
+  }
+
+  function drain() { return queue.splice(0, queue.length); }
+  return { st, can, act, step, derive, drain, hasBeam, BEAM_MODES };
+})();
+/* ===== SIM-END ===== */
+
+/* =====================================================================
+   FORMATTING HELPERS
+   ===================================================================== */
+const Fmt = (() => {
+  const SUP = { '-': '⁻', '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹' };
+  const sup = n => String(n).split('').map(c => SUP[c] || c).join('');
+  function sci(x, d = 2) {
+    if (!isFinite(x)) return '∞';
+    if (x === 0) return '0';
+    let e = Math.floor(Math.log10(Math.abs(x)));
+    let m = x / Math.pow(10, e);
+    if (Math.abs(parseFloat(m.toFixed(d))) >= 10) { m /= 10; e += 1; }
+    return `${m.toFixed(d)} × 10${sup(e)}`;
+  }
+  function si(x, unit, d = 2) {
+    if (!isFinite(x)) return '∞';
+    const a = Math.abs(x);
+    const pre = a >= 1e9 ? ['G', 1e9] : a >= 1e6 ? ['M', 1e6] : a >= 1e3 ? ['k', 1e3] : a >= 1 || a === 0 ? ['', 1] : a >= 1e-3 ? ['m', 1e-3] : a >= 1e-6 ? ['µ', 1e-6] : ['n', 1e-9];
+    return `${(x / pre[1]).toFixed(d)} ${pre[0]}${unit}`;
+  }
+  function hours(s) {
+    if (!isFinite(s)) return '∞';
+    const h = s / 3600;
+    return h >= 100 ? `${h.toFixed(0)} h` : h >= 10 ? `${h.toFixed(1)} h` : `${h.toFixed(2)} h`;
+  }
+  function clock(s) {
+    const t = Math.max(0, Math.floor(s));
+    const h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), ss = t % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+  }
+  /** integrated luminosity in cm⁻² → pb⁻¹ / fb⁻¹ */
+  function intLumi(x) {
+    const fb = x / 1e39;
+    if (fb >= 0.1) return `${fb.toFixed(3)} fb⁻¹`;
+    const pb = x / 1e36;
+    if (pb >= 0.1) return `${pb.toFixed(2)} pb⁻¹`;
+    return `${(x / 1e33).toFixed(2)} nb⁻¹`;
+  }
+  return { sci, si, hours, clock, intLumi, sup };
+})();
+
+/* Shared helpers */
+const RNG = {
+  gauss() { let u = 0, v = 0; while (u === 0) u = Math.random(); while (v === 0) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); },
+  poisson(mu) {
+    if (!(mu > 0)) return 0;
+    if (mu > 30) return Math.max(0, Math.round(mu + Math.sqrt(mu) * RNG.gauss()));
+    const L = Math.exp(-mu); let k = 0, p = 1;
+    do { k++; p *= Math.random(); } while (p > L);
+    return k - 1;
+  },
+  exp(mean) { return -mean * Math.log(1 - Math.random()); },
+};
+const prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function fitCanvas(cv) {
+  const r = cv.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const W = Math.max(1, Math.round(r.width)), H = Math.max(1, Math.round(r.height));
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  return { W, H, dpr };
+}
+function layer(W, H, dpr) {
+  const c = document.createElement('canvas');
+  c.width = Math.round(W * dpr); c.height = Math.round(H * dpr);
+  const ctx = c.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { c, ctx };
+}
+
+/* =====================================================================
+   RENDER: RING VIEW
+   ===================================================================== */
+const RingView = (() => {
+  const P = Physics, K = Physics.K;
+  const cv = document.getElementById('ringCanvas');
+  const ctx = cv.getContext('2d');
+  const DEG = Math.PI / 180, TAU = Math.PI * 2;
+  const POINT = k => ((90 + (k - 1) * 45) % 360) * DEG;     // LHC points 1–8, P1 at the front
+  const IP_DEFS = [
+    { k: 1, w: 1 }, { k: 5, w: 1 },       // ATLAS, CMS: full luminosity
+    { k: 8, w: 0.25 }, { k: 2, w: 0.08 }, // LHCb, ALICE: levelled low (display weights)
+  ];
+  const IP_ANGLES = [45, 90, 135, 270].map(d => d * DEG);
+  const TW = 0.06, SEP = 0.021;
+  const C1 = '#5cb8ff', C2 = '#a07bff';
+  let W = 0, H = 0, dpr = 1, G = null, base, glow, front, spr1, spr2, sprHit;
+  let phase = 0, glowA = 0.1, lostFlash = 0, time = 0;
+  let flashes = [], debris = [], dumpAnim = null, quenchAnim = 0;
+  const flashAcc = IP_DEFS.map(() => 0);
+  let lastDots = [];
+
+  const proj = (th, dr = 0, lift = 0) => ({
+    x: G.cx + Math.cos(th) * (1 + dr) * G.R,
+    y: G.cy + Math.sin(th) * (1 + dr) * G.R * G.tilt - lift,
+  });
+  const smooth = (e0, e1, x) => { const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
+  function angDist(a, b) { let d = Math.abs(((a - b) % TAU + TAU) % TAU); return Math.min(d, TAU - d); }
+  /** Beams sit in separate apertures and swap at each IP, crossing there. */
+  function beamOffset(th) {
+    const t = ((th % TAU) + TAU) % TAU;
+    const deg = t / DEG;
+    const sign = (deg >= 45 && deg < 90) ? 1 : (deg >= 90 && deg < 135) ? -1 : (deg >= 135 && deg < 270) ? 1 : -1;
+    let d = Infinity; for (const a of IP_ANGLES) d = Math.min(d, angDist(t, a));
+    return sign * smooth(0, 14 * DEG, d);
+  }
+  const beamPt = (th, beam) => proj(th, (beam === 1 ? 1 : -1) * SEP * beamOffset(th));
+
+  function sprite(color, size = 64) {
+    const { c, ctx: g } = layer(size, size, 1);
+    const gr = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    gr.addColorStop(0, 'rgba(255,255,255,1)');
+    gr.addColorStop(0.14, color);
+    gr.addColorStop(0.42, color + '55');
+    gr.addColorStop(1, color + '00');
+    g.fillStyle = gr; g.fillRect(0, 0, size, size);
+    return c;
+  }
+
+  function ellipsePath(c, r, lift, a0 = 0, a1 = TAU, steps = 180, move = true) {
+    for (let i = 0; i <= steps; i++) {
+      const a = a0 + (a1 - a0) * i / steps;
+      const p = proj(a, r - 1, lift);
+      if (i === 0 && move) c.moveTo(p.x, p.y); else c.lineTo(p.x, p.y);
+    }
+  }
+  function beamPath(c, beam) {
+    c.beginPath();
+    for (let i = 0; i <= 720; i++) { const p = beamPt(i / 720 * TAU, beam); i ? c.lineTo(p.x, p.y) : c.moveTo(p.x, p.y); }
+  }
+  function roundRect(c, x, y, w, h, r) {
+    c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r);
+    c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath();
+  }
+
+  function layout() {
+    ({ W, H, dpr } = fitCanvas(cv));
+    const compact = W < 560;
+    const R = compact ? Math.min(W * 0.41, H * 0.62) : Math.min(W * 0.36, H * 0.62);
+    G = { cx: W * 0.5, cy: H * (compact ? 0.5 : 0.52), R, tilt: compact ? 0.5 : 0.4, compact };
+    G.ext = R * 0.05;
+    const dA = POINT(6) + 5 * DEG;
+    G.dumpStart = proj(dA, 0); G.dumpEnd = proj(dA + 6 * DEG, compact ? 0.27 : 0.36);
+    base = layer(W, H, dpr); glow = layer(W, H, dpr); front = layer(W, H, dpr);
+    spr1 = sprite(C1); spr2 = sprite(C2); sprHit = sprite('#57ff9a');
+    buildBase(base.ctx); buildGlow(glow.ctx); buildFront(front.ctx);
+  }
+
+  function buildBase(c) {
+    let g = c.createRadialGradient(G.cx, G.cy, G.R * 0.1, G.cx, G.cy, Math.max(W, H) * 0.8);
+    g.addColorStop(0, '#0b1636'); g.addColorStop(0.5, '#050a19'); g.addColorStop(1, '#020308');
+    c.fillStyle = g; c.fillRect(0, 0, W, H);
+    // Floor grid in the ring plane, faded radially
+    const t = layer(W, H, dpr), tg = t.ctx;
+    tg.strokeStyle = 'rgba(110,150,255,0.11)'; tg.lineWidth = 1;
+    const step = 0.16, ext = 3;
+    for (let u = -ext; u <= ext + 1e-9; u += step) {
+      tg.beginPath(); tg.moveTo(G.cx + u * G.R, G.cy - ext * G.R * G.tilt); tg.lineTo(G.cx + u * G.R, G.cy + ext * G.R * G.tilt); tg.stroke();
+      tg.beginPath(); tg.moveTo(G.cx - ext * G.R, G.cy + u * G.R * G.tilt); tg.lineTo(G.cx + ext * G.R, G.cy + u * G.R * G.tilt); tg.stroke();
+    }
+    tg.globalCompositeOperation = 'destination-in';
+    const m = tg.createRadialGradient(G.cx, G.cy, G.R * 0.3, G.cx, G.cy, G.R * 1.8);
+    m.addColorStop(0, 'rgba(0,0,0,1)'); m.addColorStop(1, 'rgba(0,0,0,0)');
+    tg.fillStyle = m; tg.fillRect(0, 0, W, H);
+    c.drawImage(t.c, 0, 0, W, H);
+
+    // Inner wall (back half) for depth
+    c.beginPath(); ellipsePath(c, 1 - TW, 0, Math.PI, TAU); ellipsePath(c, 1 - TW, -G.ext, TAU, Math.PI, 180, false); c.closePath();
+    c.fillStyle = 'rgba(8,14,34,0.9)'; c.fill();
+    // Outer extrusion (front half)
+    c.beginPath(); ellipsePath(c, 1 + TW, 0, 0, Math.PI); ellipsePath(c, 1 + TW, -G.ext, Math.PI, 0, 180, false); c.closePath();
+    g = c.createLinearGradient(0, G.cy, 0, G.cy + G.R * G.tilt + G.ext);
+    g.addColorStop(0, 'rgba(36,64,140,0.55)'); g.addColorStop(1, 'rgba(5,9,22,0.95)');
+    c.fillStyle = g; c.fill();
+    c.strokeStyle = 'rgba(120,160,255,0.28)'; c.lineWidth = 1;
+    c.beginPath(); ellipsePath(c, 1 + TW, -G.ext, 0, Math.PI); c.stroke();
+    // Top surface annulus
+    c.beginPath(); ellipsePath(c, 1 + TW, 0); c.closePath(); ellipsePath(c, 1 - TW, 0); c.closePath();
+    g = c.createLinearGradient(0, G.cy - G.R * G.tilt, 0, G.cy + G.R * G.tilt);
+    g.addColorStop(0, 'rgba(26,44,98,0.32)'); g.addColorStop(1, 'rgba(34,58,128,0.5)');
+    c.fillStyle = g; c.fill('evenodd');
+    c.strokeStyle = 'rgba(140,180,255,0.5)'; c.lineWidth = 1;
+    c.beginPath(); ellipsePath(c, 1 + TW, 0); c.stroke();
+    c.beginPath(); ellipsePath(c, 1 - TW, 0); c.stroke();
+
+    drawDipoles(c);
+    // Dim beam channels (visible even with no beam)
+    c.lineWidth = 1.2;
+    c.strokeStyle = 'rgba(90,130,230,0.32)'; beamPath(c, 1); c.stroke();
+    c.strokeStyle = 'rgba(140,110,230,0.28)'; beamPath(c, 2); c.stroke();
+    drawRF(c); drawDumpLine(c);
+    drawDetector(c, POINT(5), 0.62, 0.95);
+    for (const ip of IP_DEFS) { const p = proj(POINT(ip.k)); c.fillStyle = 'rgba(200,225,255,0.5)'; c.beginPath(); c.arc(p.x, p.y, 1.6, 0, TAU); c.fill(); }
+  }
+
+  function dipoleQuads() {
+    const q = [];
+    for (let k = 0; k < 8; k++) {
+      const a0 = (k * 45 + 9) * DEG, a1 = (k * 45 + 36) * DEG;
+      const n = G.compact ? 6 : 9;
+      for (let i = 0; i < n; i++) {
+        const a = a0 + (a1 - a0) * (i + 0.5) / n, da = (a1 - a0) / n * 0.36;
+        q.push([proj(a - da, -0.042), proj(a + da, -0.042), proj(a + da, 0.042), proj(a - da, 0.042), Math.sin(a)]);
+      }
+    }
+    return q;
+  }
+  function drawDipoles(c, color) {
+    for (const [a, b, d, e, depth] of dipoleQuads()) {
+      c.beginPath(); c.moveTo(a.x, a.y); c.lineTo(b.x, b.y); c.lineTo(d.x, d.y); c.lineTo(e.x, e.y); c.closePath();
+      if (color) { c.fillStyle = color; c.fill(); continue; }
+      c.fillStyle = `rgba(80,130,255,${0.13 + 0.08 * (depth + 1) / 2})`; c.fill();
+      c.strokeStyle = `rgba(150,190,255,${0.22 + 0.18 * (depth + 1) / 2})`; c.lineWidth = 0.8; c.stroke();
+    }
+  }
+  function drawRF(c) {
+    const a0 = POINT(4);
+    for (const off of [-4.5, -1.5, 1.5, 4.5]) {
+      const th = a0 + off * DEG, p = proj(th);
+      const ang = Math.atan2(Math.cos(th) * G.tilt, -Math.sin(th));
+      c.save(); c.translate(p.x, p.y); c.rotate(ang);
+      const w = G.R * 0.055, h = G.R * 0.034;
+      const g = c.createLinearGradient(0, -h / 2, 0, h / 2);
+      g.addColorStop(0, '#e6a46a'); g.addColorStop(0.5, '#a8622f'); g.addColorStop(1, '#4a2611');
+      roundRect(c, -w / 2, -h / 2, w, h, h / 2); c.fillStyle = g; c.fill();
+      c.strokeStyle = 'rgba(255,210,170,0.55)'; c.lineWidth = 0.8; c.stroke();
+      c.strokeStyle = 'rgba(60,25,8,0.7)';
+      for (let i = 1; i < 4; i++) { const x = -w / 2 + w * i / 4; c.beginPath(); c.moveTo(x, -h / 2); c.lineTo(x, h / 2); c.stroke(); }
+      c.restore();
+    }
+  }
+  function drawDumpLine(c) {
+    const s = G.dumpStart, e = G.dumpEnd;
+    c.strokeStyle = 'rgba(140,170,240,0.35)'; c.lineWidth = 1.4; c.setLineDash([4, 3]);
+    c.beginPath(); c.moveTo(s.x, s.y); c.lineTo(e.x, e.y); c.stroke(); c.setLineDash([]);
+    const w = G.R * 0.12, h = G.R * 0.06;
+    const g = c.createLinearGradient(0, e.y - h / 2, 0, e.y + h / 2);
+    g.addColorStop(0, '#2a3346'); g.addColorStop(1, '#0d111b');
+    roundRect(c, e.x - w / 2, e.y - h / 2, w, h, 3); c.fillStyle = g; c.fill();
+    c.strokeStyle = 'rgba(255,181,71,0.55)'; c.lineWidth = 1; c.stroke();
+  }
+  function drawDetector(c, th, s, alpha) {
+    const p = proj(th);
+    const tx = Math.abs(Math.sin(th));
+    const w = G.R * 0.27 * s * (0.55 + 0.45 * tx), h = G.R * 0.21 * s;
+    const x0 = p.x - w / 2, y0 = p.y - h * 0.62;
+    c.save(); c.globalAlpha = alpha;
+    c.fillStyle = 'rgba(0,0,0,0.35)'; c.beginPath(); c.ellipse(p.x, p.y + h * 0.42, w * 0.55, h * 0.12, 0, 0, TAU); c.fill();
+    const g = c.createLinearGradient(0, y0, 0, y0 + h);
+    g.addColorStop(0, 'rgba(110,150,255,0.30)'); g.addColorStop(0.55, 'rgba(30,50,120,0.42)'); g.addColorStop(1, 'rgba(8,14,36,0.78)');
+    roundRect(c, x0, y0, w, h, 6 * s); c.fillStyle = g; c.fill();
+    c.strokeStyle = 'rgba(160,195,255,0.7)'; c.lineWidth = 1.1; c.stroke();
+    c.strokeStyle = 'rgba(170,200,255,0.16)'; c.lineWidth = 1;
+    for (let i = 1; i < 8; i++) { const x = x0 + w * i / 8; c.beginPath(); c.moveTo(x, y0 + 4); c.lineTo(x, y0 + h - 4); c.stroke(); }
+    c.strokeStyle = 'rgba(190,215,255,0.45)';
+    for (const fx of [0.07, 0.93]) { c.beginPath(); c.ellipse(x0 + w * fx, p.y - h * 0.12, w * 0.035, h * 0.42, 0, 0, TAU); c.stroke(); }
+    c.strokeStyle = 'rgba(255,255,255,0.35)'; c.beginPath(); c.moveTo(x0 + 6 * s, y0 + 1.5); c.lineTo(x0 + w - 6 * s, y0 + 1.5); c.stroke();
+    c.fillStyle = 'rgba(2,4,10,0.85)'; c.beginPath(); c.ellipse(p.x, p.y, w * 0.06, h * 0.13, 0, 0, TAU); c.fill();
+    c.strokeStyle = 'rgba(120,200,255,0.8)'; c.stroke();
+    c.restore();
+  }
+  function buildGlow(c) {
+    c.save(); c.globalCompositeOperation = 'lighter';
+    for (const [beam, col] of [[1, C1], [2, C2]]) {
+      c.shadowColor = col; c.shadowBlur = 16; c.lineWidth = 2.4; c.strokeStyle = col + 'cc'; beamPath(c, beam); c.stroke();
+      c.shadowBlur = 0; c.lineWidth = 1; c.strokeStyle = 'rgba(235,245,255,0.75)'; beamPath(c, beam); c.stroke();
+    }
+    // Direction chevrons: beam 1 clockwise (increasing θ), beam 2 counter-clockwise
+    for (const [beam, col, dir] of [[1, C1, 1], [2, C2, -1]]) {
+      for (const deg of [20, 160, 200, 340]) {
+        const th = deg * DEG, p = beamPt(th, beam), q = beamPt(th + dir * 0.02, beam);
+        const a = Math.atan2(q.y - p.y, q.x - p.x), s = G.R * 0.022;
+        c.strokeStyle = col; c.lineWidth = 1.6; c.shadowColor = col; c.shadowBlur = 8;
+        c.beginPath(); c.moveTo(p.x - Math.cos(a - 0.6) * s, p.y - Math.sin(a - 0.6) * s); c.lineTo(p.x, p.y);
+        c.lineTo(p.x - Math.cos(a + 0.6) * s, p.y - Math.sin(a + 0.6) * s); c.stroke();
+      }
+    }
+    c.restore();
+  }
+  function buildFront(c) {
+    drawDetector(c, POINT(8), 0.5, 0.95);
+    drawDetector(c, POINT(2), 0.46, 0.95);
+    drawDetector(c, POINT(1), 1.0, 0.94);
+  }
+
+  function notify(n) {
+    if (n.type === 'lost') {
+      lostFlash = 1;
+      for (const d of lastDots) {
+        const vx = d.x - G.cx, vy = (d.y - G.cy) / G.tilt, m = Math.hypot(vx, vy) || 1;
+        const sp = G.R * (0.25 + Math.random() * 0.45);
+        debris.push({ x: d.x, y: d.y, vx: vx / m * sp + RNG.gauss() * 10, vy: vy / m * sp * G.tilt + RNG.gauss() * 10, life: 1.3, max: 1.3, s: d.s, spr: d.spr });
+      }
+    } else if (n.type === 'dump') {
+      dumpAnim = { t: 0, dur: 2.0 };
+    } else if (n.type === 'quench') {
+      quenchAnim = 1;
+    }
+  }
+
+  function draw(dt, d, S) {
+    if (!G) return;
+    time += dt;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+    ctx.drawImage(base.c, 0, 0, W, H);
+
+    // Ring glow follows the beam current; darkens after a dump.
+    const target = d.beam ? 0.35 + 0.65 * Math.min(1, d.I / 0.58) ** 0.5 : (d.mode === 'QUENCH' ? 0 : 0.06);
+    glowA += (target - glowA) * Math.min(1, dt * 3);
+    ctx.globalAlpha = glowA; ctx.drawImage(glow.c, 0, 0, W, H); ctx.globalAlpha = 1;
+
+    // Quench: dipoles glow hot while the field collapses
+    if (d.mode === 'QUENCH' || quenchAnim > 0.01) {
+      quenchAnim = d.mode === 'QUENCH' ? Math.max(0.35, Math.sqrt(d.B / Math.max(d.quenchB, 1))) : quenchAnim * Math.exp(-dt * 2);
+      const pulse = prefersReducedMotion ? 0.7 : 0.55 + 0.45 * Math.abs(Math.sin(time * 7));
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      drawDipoles(ctx, `rgba(255,110,50,${0.55 * quenchAnim * pulse})`);
+      ctx.strokeStyle = `rgba(255,120,60,${0.35 * quenchAnim * pulse})`; ctx.lineWidth = G.R * TW * G.tilt * 1.6;
+      ctx.beginPath(); ellipsePath(ctx, 1, 0); ctx.stroke();
+      ctx.restore();
+    }
+
+    // Bunches
+    const omega = (prefersReducedMotion ? 0.015 : 0.04) * Math.pow(S.speed, 0.35) * TAU;
+    phase += omega * dt;
+    lastDots = [];
+    let perDot = 1;
+    if (d.beam) {
+      const pat = Physics.fillingPattern(d.nbSet);
+      const shown = d.mode === 'INJECTING' ? Math.max(1, Math.ceil(pat.length * d.injFrac)) : pat.length;
+      perDot = Math.max(1, Math.ceil(pat.length / (G.compact ? 140 : 220)));
+      const f = Math.min(1.6, d.N / 1.15e11);
+      const alpha = 0.3 + 0.55 * Math.min(1, f) + 0.15 * Math.max(0, f - 1);
+      const baseS = G.R * (G.compact ? 0.06 : 0.05) * (0.75 + 0.25 * Math.min(1.6, f));
+      ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = alpha;
+      for (let i = 0; i < shown; i += perDot) {
+        const off = pat[i] / K.BUCKET_SLOTS * TAU;
+        for (const [beam, spr, th] of [[1, spr1, phase + off], [2, spr2, -phase - off + Math.PI]]) {
+          const p = beamPt(th, beam), dep = Math.sin(th);
+          const s = baseS * (0.72 + 0.28 * (dep + 1) / 2);
+          ctx.drawImage(spr, p.x - s / 2, p.y - s / 2, s, s);
+          lastDots.push({ x: p.x, y: p.y, s, spr });
+        }
+      }
+      ctx.restore();
+    }
+    // Beam-loss debris
+    if (debris.length) {
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      for (const p of debris) {
+        p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt;
+        ctx.globalAlpha = Math.max(0, p.life / p.max);
+        ctx.drawImage(p.spr, p.x - p.s / 2, p.y - p.s / 2, p.s, p.s);
+      }
+      ctx.restore();
+      debris = debris.filter(p => p.life > 0);
+    }
+
+    ctx.drawImage(front.c, 0, 0, W, H);
+
+    // Collision flashes: frequency and brightness scale with luminosity / pile-up
+    if (d.colliding) {
+      IP_DEFS.forEach((ip, i) => {
+        const rate = Math.min(30, 6 * (d.L / 1e34) * ip.w);
+        flashAcc[i] += rate * dt;
+        while (flashAcc[i] >= 1) {
+          flashAcc[i] -= 1;
+          const str = Math.min(1.6, 0.35 + 0.65 * Math.sqrt(d.mu / 25)) * (0.5 + 0.5 * Math.sqrt(ip.w));
+          const rays = []; const nr = 7 + Math.floor(Math.random() * 6);
+          for (let r = 0; r < nr; r++) rays.push({ a: Math.random() * TAU, l: (0.5 + Math.random()) * G.R * 0.16 * str });
+          flashes.push({ th: POINT(ip.k), age: 0, life: 0.5, str, rays, k: ip.k });
+          if (flashes.length > 80) flashes.shift();
+        }
+      });
+    }
+    if (flashes.length) {
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      for (const f of flashes) {
+        f.age += dt;
+        const u = f.age / f.life, k = Math.max(0, 1 - u);
+        const p = proj(f.th);
+        const r = G.R * 0.09 * f.str * (0.5 + 0.9 * u);
+        const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+        g.addColorStop(0, `rgba(255,255,255,${k})`); g.addColorStop(0.25, `rgba(150,255,200,${0.85 * k})`);
+        g.addColorStop(0.6, `rgba(60,255,140,${0.22 * k})`); g.addColorStop(1, 'rgba(60,255,140,0)');
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, TAU); ctx.fill();
+        ctx.strokeStyle = `rgba(110,255,170,${0.65 * k})`; ctx.lineWidth = 1;
+        for (const ray of f.rays) {
+          const L = ray.l * (0.3 + 0.7 * Math.min(1, u * 2.5));
+          ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + Math.cos(ray.a) * L, p.y + Math.sin(ray.a) * L * 0.75); ctx.stroke();
+        }
+        if (f.k === 1 || f.k === 5) {
+          ctx.strokeStyle = `rgba(120,255,180,${0.35 * k})`;
+          for (const sx of [-1, 1]) {
+            ctx.beginPath(); ctx.moveTo(p.x, p.y);
+            const hgt = G.R * 0.32 * f.str * Math.min(1, u * 2);
+            ctx.quadraticCurveTo(p.x + sx * hgt * 0.15, p.y - hgt * 1.2, p.x + sx * hgt * 0.55, p.y - hgt * 0.35);
+            ctx.stroke();
+          }
+        }
+      }
+      ctx.restore();
+      flashes = flashes.filter(f => f.age < f.life);
+    }
+
+    // Dump: beam extracted along the dump line and swept over the block
+    if (dumpAnim) {
+      dumpAnim.t += dt;
+      const u = dumpAnim.t / dumpAnim.dur, s = G.dumpStart, e = G.dumpEnd;
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      if (u < 0.3) {
+        const v = u / 0.3, x = s.x + (e.x - s.x) * v, y = s.y + (e.y - s.y) * v;
+        ctx.strokeStyle = 'rgba(180,220,255,0.9)'; ctx.lineWidth = 2.5; ctx.shadowColor = C1; ctx.shadowBlur = 14;
+        ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(x, y); ctx.stroke();
+      }
+      const k = Math.max(0, 1 - Math.max(0, u - 0.25) / 0.75);
+      const g = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, G.R * 0.16);
+      g.addColorStop(0, `rgba(255,220,150,${0.9 * k})`); g.addColorStop(1, 'rgba(255,140,40,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(e.x, e.y, G.R * 0.16, 0, TAU); ctx.fill();
+      // dilution kicker sweep (the 'e'-shaped painting on the dump block)
+      const prog = Math.min(1, Math.max(0, (u - 0.2) / 0.5));
+      ctx.strokeStyle = `rgba(255,200,120,${0.85 * k})`; ctx.lineWidth = 1.2; ctx.shadowBlur = 0;
+      ctx.beginPath();
+      for (let i = 0; i <= 60 * prog; i++) {
+        const v = i / 60, a = v * TAU * 1.1, rr = G.R * 0.035 * (0.35 + 0.65 * v);
+        const x = e.x + Math.sin(a) * rr, y = e.y - Math.cos(a) * rr * 0.6;
+        i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+      }
+      ctx.stroke(); ctx.restore();
+      if (u >= 1) dumpAnim = null;
+    }
+    if (lostFlash > 0) {
+      lostFlash = Math.max(0, lostFlash - dt * 1.2);
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = `rgba(255,70,80,${0.6 * lostFlash})`; ctx.lineWidth = G.R * 0.05;
+      ctx.beginPath(); ellipsePath(ctx, 1, 0); ctx.stroke(); ctx.restore();
+    }
+
+    drawLabels(d, S, perDot);
+  }
+
+  function drawLabels(d, S, perDot) {
+    const c = ctx, cp = G.compact;
+    const tf = cp ? '300 11px ' : '300 13px ', sf = cp ? '10px ' : '11px ';
+    const sans = getComputedStyle(document.body).fontFamily, mono = 'ui-monospace,"SF Mono",Menlo,Consolas,monospace';
+    const lineH = cp ? 13 : 15;
+    const Ep = d.beam ? d.E : d.Eset;
+    const items = [
+      { title: 'RF cavities', sub: cp ? `${K.RF_MHZ.toFixed(1)} MHz, ${d.U0.toFixed(2)} keV/turn` : `${K.RF_MHZ} MHz, U₀ ${d.U0.toFixed(2)} keV/turn`,
+        at: [0.035, cp ? 0.19 : 0.12], align: 'left', anchor: proj(POINT(4)) },
+      { title: 'Interaction point, IP5', sub: d.mode === 'ADJUST' || d.mode === 'STABLE' || d.mode === 'SQUEEZING'
+          ? `β* ${(d.beta * 100).toFixed(0)} cm, σ* ${(d.sigmaStar * 1e6).toFixed(1)} µm` : `β* ${(d.beta * 100).toFixed(0)} cm (injection optics)`,
+        at: [0.5, cp ? 0.055 : 0.07], align: 'center', anchor: proj(POINT(5), 0, 2) },
+      { title: 'Beam dump', sub: d.beam ? `${(d.Estored / 1e6).toFixed(0)} MJ ${cp ? 'per beam' : 'stored per beam'}` : 'idle, no beam',
+        at: [0.965, cp ? 0.19 : 0.12], align: 'right', anchor: { x: G.dumpEnd.x, y: G.dumpEnd.y - G.R * 0.03 } },
+      { title: 'Dipole magnets', sub: `${d.B.toFixed(2)} T, ${K.N_DIPOLES} dipoles`,
+        at: [0.965, cp ? 0.85 : 0.84], align: 'right', anchor: proj(22 * DEG, 0.03) },
+      { title: 'Detector, IP1', sub: d.colliding ? `${Fmt.sci(d.R, 1)} events/s` : 'waiting for collisions',
+        at: [0.035, cp ? 0.85 : 0.84], align: 'left', anchor: (() => { const p = proj(POINT(1)); return { x: p.x - G.R * 0.11, y: p.y - G.R * 0.07 }; })() },
+    ];
+    for (const it of items) {
+      const x = it.at[0] * W, y = it.at[1] * H;
+      c.font = tf + sans; const tw = c.measureText(it.title).width;
+      c.font = sf + mono; const sw = c.measureText(it.sub).width;
+      const w = Math.max(tw, sw);
+      const left = it.align === 'left' ? x : it.align === 'right' ? x - w : x - w / 2;
+      const uy = y + lineH + (cp ? 6 : 7);
+      c.textAlign = 'left'; c.textBaseline = 'alphabetic';
+      c.fillStyle = 'rgba(240,245,255,0.95)'; c.font = tf + sans; c.fillText(it.title, left, y);
+      c.fillStyle = 'rgba(160,178,220,0.95)'; c.font = sf + mono; c.fillText(it.sub, left, y + lineH);
+      // leader line from the underline to the component
+      c.strokeStyle = 'rgba(235,242,255,0.5)'; c.lineWidth = 0.8;
+      c.beginPath(); c.moveTo(left, uy); c.lineTo(left + w, uy);
+      const sx = it.align === 'center' ? left + w / 2 : (it.anchor.x > left + w / 2 ? left + w : left);
+      c.moveTo(sx, uy); c.lineTo(it.anchor.x, it.anchor.y); c.stroke();
+      c.fillStyle = '#fff'; c.beginPath(); c.arc(it.anchor.x, it.anchor.y, 2, 0, TAU); c.fill();
+      c.strokeStyle = 'rgba(255,255,255,0.4)'; c.beginPath(); c.arc(it.anchor.x, it.anchor.y, 5, 0, TAU); c.stroke();
+    }
+    // Caption
+    c.font = (cp ? '9.5px ' : '11px ') + mono; c.textAlign = 'center'; c.fillStyle = 'rgba(130,150,200,0.85)';
+    const cap1 = `beam 1 clockwise (blue), beam 2 counter-clockwise (violet)`;
+    const cap2 = (d.beam ? `1 dot = ${perDot} bunch${perDot > 1 ? 'es' : ''}; ` : 'no beam; ') + 'motion slowed from f_rev = 11.245 kHz';
+    if (cp) { c.fillText(cap1, W / 2, H - 22); c.fillText(cap2, W / 2, H - 9); }
+    else c.fillText(`${cap1}; ${cap2}`, W / 2, H - 12);
+    c.textAlign = 'left';
+  }
+
+  return { layout, draw, notify };
+})();
+
+/* =====================================================================
+   RENDER: OSCILLOSCOPE (luminometer)
+   CH1: interactions per crossing at IP1, scanning bunch slots (Poisson(μ) in
+        filled slots, 0 in empty slots and the abort gap).
+   CH2: luminosity and beam current history over the fill.
+   ===================================================================== */
+const Scope = (() => {
+  const P = Physics, K = Physics.K;
+  const cv = document.getElementById('scopeCanvas'), ctx = cv.getContext('2d');
+  const meta = document.getElementById('scopeMeta');
+  let W = 0, H = 0, dpr = 1;
+  const NCOL = 900, cols = new Float32Array(NCOL);
+  let head = 0, slot = 0, acc = 0, yMax = 10;
+  const filled = new Uint8Array(K.BUCKET_SLOTS); let filledFor = -1;
+  const hist = []; let histAcc = 0; const HMAX = 480;
+  const SLOTS_PER_S = 1300;
+
+  function layout() { ({ W, H, dpr } = fitCanvas(cv)); }
+  function refreshPattern(nb) {
+    if (nb === filledFor) return;
+    filled.fill(0); for (const s of P.fillingPattern(nb)) filled[s] = 1; filledFor = nb;
+  }
+  function update(dt, d) {
+    refreshPattern(d.nbSet);
+    acc += SLOTS_PER_S * dt;
+    while (acc >= 1) {
+      acc -= 1;
+      cols[head] = d.colliding && filled[slot] ? RNG.poisson(d.mu) : 0;
+      head = (head + 1) % NCOL; slot = (slot + 1) % K.BUCKET_SLOTS;
+    }
+    histAcc += dt;
+    if (histAcc >= 0.1) {
+      histAcc = 0;
+      hist.push({ t: d.simTime, L: d.L, I: d.I });
+      if (hist.length > HMAX) hist.shift();
+    }
+    const tgt = Math.max(5, d.mu + 4 * Math.sqrt(Math.max(d.mu, 1)));
+    yMax += (tgt - yMax) * Math.min(1, dt * 2);
+  }
+  function grid(x0, y0, w, h, nx, ny) {
+    ctx.strokeStyle = 'rgba(164,107,255,0.09)'; ctx.lineWidth = 1;
+    for (let i = 0; i <= nx; i++) { const x = Math.round(x0 + w * i / nx) + 0.5; ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x, y0 + h); ctx.stroke(); }
+    for (let j = 0; j <= ny; j++) { const y = Math.round(y0 + h * j / ny) + 0.5; ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x0 + w, y); ctx.stroke(); }
+  }
+  function glowLine(pts, color, core) {
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = color + '40'; ctx.lineWidth = 5; ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.stroke();
+    ctx.strokeStyle = color + 'aa'; ctx.lineWidth = 2.2; ctx.stroke();
+    ctx.strokeStyle = core; ctx.lineWidth = 1; ctx.stroke();
+  }
+  function draw(d) {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = '#05060f'; ctx.fillRect(0, 0, W, H);
+    const pad = 12, lab = 16;
+    const h1 = (H - pad * 2 - lab * 2 - 10) * 0.55, h2 = (H - pad * 2 - lab * 2 - 10) * 0.45;
+    const x0 = pad, w = W - pad * 2;
+    const y1 = pad + lab, y2 = y1 + h1 + 10 + lab;
+    const mono = '10.5px ui-monospace,"SF Mono",Menlo,Consolas,monospace';
+    ctx.font = mono; ctx.textBaseline = 'alphabetic';
+
+    // CH1
+    grid(x0, y1, w, h1, 10, 4);
+    ctx.fillStyle = '#c9a3ff'; ctx.fillText(W > 360 ? 'CH1  interactions per crossing at IP1, by bunch' : 'CH1  interactions per crossing, IP1', x0, y1 - 5);
+    if (d.colliding) {
+      ctx.textAlign = 'right'; ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.fillText(`mean μ = ${d.mu.toFixed(1)}`, x0 + w - 4, y1 + 12); ctx.textAlign = 'left';
+    }
+    const pts = [];
+    for (let i = 0; i < NCOL; i++) {
+      const v = cols[(head + i) % NCOL];
+      pts.push([x0 + w * i / (NCOL - 1), y1 + h1 - Math.min(1, v / yMax) * (h1 - 2) - 1]);
+    }
+    glowLine(pts, '#a46bff', '#ecdcff');
+    if (d.colliding) {
+      const ym = y1 + h1 - Math.min(1, d.mu / yMax) * (h1 - 2);
+      ctx.setLineDash([3, 4]); ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.beginPath(); ctx.moveTo(x0, ym); ctx.lineTo(x0 + w, ym); ctx.stroke(); ctx.setLineDash([]);
+    } else {
+      ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(150,140,200,0.7)';
+      ctx.fillText(d.beam ? 'beams separated at the IPs, no collisions' : 'no beam', x0 + w / 2, y1 + h1 / 2); ctx.textAlign = 'left';
+    }
+
+    // CH2
+    grid(x0, y2, w, h2, 10, 3);
+    ctx.fillStyle = '#c9a3ff'; ctx.fillText('CH2  luminosity', x0, y2 - 5);
+    ctx.fillStyle = '#8cc8ff'; ctx.fillText('and beam current', x0 + ctx.measureText('CH2  luminosity ').width, y2 - 5);
+    if (hist.length > 1) {
+      const span = hist[hist.length - 1].t - hist[0].t;
+      ctx.textAlign = 'right'; ctx.fillStyle = 'rgba(200,180,255,0.75)';
+      ctx.fillText(`last ${span >= 3600 ? (span / 3600).toFixed(1) + ' h' : (span / 60).toFixed(1) + ' min'} sim`, x0 + w, y2 - 5); ctx.textAlign = 'left';
+      let Lm = 0, Im = 0; for (const s of hist) { Lm = Math.max(Lm, s.L); Im = Math.max(Im, s.I); }
+      const px = i => x0 + w * (i + HMAX - hist.length) / (HMAX - 1);
+      if (Im > 0) glowLine(hist.map((s, i) => [px(i), y2 + h2 - s.I / Im * (h2 - 4) - 2]), '#5cb8ff', '#d8ecff');
+      if (Lm > 0) glowLine(hist.map((s, i) => [px(i), y2 + h2 - s.L / Lm * (h2 - 4) - 2]), '#a46bff', '#f1e4ff');
+      const last = hist[hist.length - 1];
+      ctx.fillStyle = 'rgba(5,6,15,0.78)'; ctx.fillRect(x0 + 1, y2 + 2, Math.min(w - 2, 250), 28);
+      ctx.fillStyle = 'rgba(200,190,240,0.9)';
+      ctx.fillText(Lm > 0 ? `L ${Fmt.sci(last.L, 2)}  (full scale ${Fmt.sci(Lm, 1)})` : 'L = 0', x0 + 4, y2 + 12);
+      ctx.fillStyle = 'rgba(150,200,255,0.8)';
+      ctx.fillText(Im > 0 ? `I ${(last.I).toFixed(3)} A  (full scale ${Im.toFixed(3)} A)` : 'I = 0', x0 + 4, y2 + 25);
+    }
+    meta.textContent = `${SLOTS_PER_S} slots/s scan`;
+  }
+  return { layout, update, draw };
+})();
+
+/* =====================================================================
+   RENDER: DETECTOR EVENT DISPLAY (toy event generator, CMS-like geometry)
+   Display rate = min(R × 5×10⁻⁹, 20) per real second, so the shown sampling
+   factor R / rate always agrees with the event-rate readout.
+   ===================================================================== */
+const EventDisplay = (() => {
+  const P = Physics, K = Physics.K;
+  const cv = document.getElementById('eventCanvas'), ctx = cv.getContext('2d');
+  const metaEl = document.getElementById('evtMeta'), rateEl = document.getElementById('evtRate');
+  const K_DISPLAY = 5e-9, CAP = 20;
+  const MIX = { golden: 0.03, dijet: 0.15 }; // display-enriched sampling (true rates are many orders smaller)
+  let W = 0, H = 0, dpr = 1, geo = null, bg = null;
+  let events = [], acc = 0, shownRate = 0, sampling = Infinity, lastMetaUpdate = 0;
+
+  // Radial scale (m → fraction of display radius): tracker gets 46%, calorimeters 26%, muon system 28%.
+  function mapR(r) {
+    if (r <= 1.1) return r / 1.1 * 0.46;
+    if (r <= 3.0) return 0.46 + (r - 1.1) / 1.9 * 0.26;
+    return 0.72 + Math.min(r - 3.0, 4.4) / 4.4 * 0.28;
+  }
+  function toPx(x, y) { const r = Math.hypot(x, y); if (r === 0) return [geo.cx, geo.cy]; const s = mapR(r) * geo.R / r; return [geo.cx + x * s, geo.cy - y * s]; }
+
+  function layout() {
+    ({ W, H, dpr } = fitCanvas(cv));
+    const stripH = 46;
+    geo = { cx: W / 2, cy: (H - stripH) / 2 + 2, R: Math.min(W * 0.46, (H - stripH) * 0.47), stripY: H - stripH + 6, stripH: stripH - 14 };
+    bg = layer(W, H, dpr); drawBackground(bg.ctx);
+  }
+  function drawBackground(c) {
+    c.fillStyle = '#04060d'; c.fillRect(0, 0, W, H);
+    const ring = (r0, r1, fill, stroke) => {
+      c.beginPath(); c.arc(geo.cx, geo.cy, mapR(r1) * geo.R, 0, Math.PI * 2); c.arc(geo.cx, geo.cy, mapR(r0) * geo.R, 0, Math.PI * 2, true);
+      c.fillStyle = fill; c.fill();
+      if (stroke) { c.strokeStyle = stroke; c.lineWidth = 1; c.beginPath(); c.arc(geo.cx, geo.cy, mapR(r1) * geo.R, 0, Math.PI * 2); c.stroke(); }
+    };
+    // muon stations (12-fold)
+    for (const [r0, r1] of [[4.0, 4.4], [4.9, 5.3], [5.8, 6.2], [6.8, 7.2]]) {
+      c.strokeStyle = 'rgba(255,90,110,0.22)'; c.lineWidth = Math.max(2, (mapR(r1) - mapR(r0)) * geo.R);
+      c.beginPath();
+      for (let i = 0; i <= 12; i++) { const a = i / 12 * Math.PI * 2 + Math.PI / 12; const rr = mapR((r0 + r1) / 2) * geo.R; const x = geo.cx + Math.cos(a) * rr, y = geo.cy + Math.sin(a) * rr; i ? c.lineTo(x, y) : c.moveTo(x, y); }
+      c.stroke();
+    }
+    ring(1.8, 2.95, 'rgba(255,181,71,0.05)', 'rgba(255,181,71,0.18)');
+    ring(1.29, 1.75, 'rgba(87,255,154,0.06)', 'rgba(87,255,154,0.22)');
+    ring(2.95, 3.0, 'rgba(61,139,255,0.5)', null);
+    c.strokeStyle = 'rgba(255,181,71,0.07)'; c.lineWidth = 1;
+    for (let i = 0; i < 72; i++) { const a = i / 72 * Math.PI * 2; const [x0, y0] = toPx(Math.cos(a) * 1.8, Math.sin(a) * 1.8); const [x1, y1] = toPx(Math.cos(a) * 2.95, Math.sin(a) * 2.95); c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke(); }
+    c.strokeStyle = 'rgba(140,180,255,0.12)';
+    for (const r of [0.044, 0.073, 0.11, 0.25, 0.5, 0.75, 1.1]) { c.beginPath(); c.arc(geo.cx, geo.cy, mapR(r) * geo.R, 0, Math.PI * 2); c.stroke(); }
+    // z strip frame
+    const x0 = 14, x1 = W - 14, y = geo.stripY + geo.stripH / 2;
+    c.strokeStyle = 'rgba(140,180,255,0.3)'; c.beginPath(); c.moveTo(x0, y); c.lineTo(x1, y); c.stroke();
+    c.font = '10px ui-monospace,"SF Mono",Menlo,Consolas,monospace'; c.fillStyle = 'rgba(130,150,200,0.8)';
+    c.textAlign = 'left'; c.fillText('z −20 cm', x0, geo.stripY - 1);
+    c.textAlign = 'right'; c.fillText('+20 cm', x1, geo.stripY - 1);
+    c.textAlign = 'center'; c.fillText('beam axis, vertices', W / 2, geo.stripY - 1);
+    c.textAlign = 'left';
+    c.fillText('transverse view, B = 3.8 T', 10, 14);
+  }
+
+  /** Helix in the transverse plane: radius of curvature R_c[m] = pT[GeV] / (0.3 B[T]) */
+  function propagate(pt, phi0, q, rStop) {
+    const pts = [[0, 0]];
+    let x = 0, y = 0, phi = phi0, s = 0, n = 0;
+    const Rc0 = pt / (0.2998 * K.SOLENOID_T);
+    const maxS = rStop > 3 ? 12 : Math.min(3, Math.PI * Rc0 * 1.15);
+    while (s < maxS) {
+      const r = Math.hypot(x, y);
+      const B = r < 2.95 ? K.SOLENOID_T : r < 3.05 ? 0 : K.RETURN_YOKE_T;
+      const ds = Math.min(0.03, (B ? pt / (0.2998 * Math.abs(B)) : 1) / 8);
+      if (B) phi -= q * ds * (0.2998 * B) / pt;
+      x += Math.cos(phi) * ds; y += Math.sin(phi) * ds; s += ds;
+      if (++n % 2 === 0) pts.push([x, y]);
+      if (Math.hypot(x, y) >= rStop) break;
+    }
+    pts.push([x, y]);
+    return { pts, end: [x, y], reached: Math.hypot(x, y) >= rStop - 1e-6 };
+  }
+
+  function makeEvent(d) {
+    const r = Math.random();
+    const type = r < MIX.golden ? 'golden' : r < MIX.golden + MIX.dijet ? 'dijet' : 'minbias';
+    const tracks = [], towers = [];
+    const hadron = (pt, phi, q, alpha = 0.75) => {
+      const t = propagate(pt, phi, q, 1.1);
+      tracks.push({ pts: t.pts, color: '#8cc4ff', w: 1, a: alpha });
+      if (t.reached && pt > 0.8) towers.push({ phi: Math.atan2(t.end[1], t.end[0]), dphi: 0.05, r0: 1.8, r1: 1.8 + Math.min(1.1, 0.15 * Math.log(1 + pt) * 2), color: '255,181,71', a: 0.55 });
+    };
+    // soft underlying event: dN/dη × Δη(5) × display fraction(0.6)
+    const nSoft = RNG.poisson(P.dNchdEta(d.sqrtS) * 5 * 0.6);
+    for (let i = 0; i < nSoft; i++) hadron(0.3 + RNG.exp(0.45), Math.random() * Math.PI * 2, Math.random() < 0.5 ? 1 : -1, 0.55);
+    let summary = '';
+    if (type === 'dijet') {
+      const phiJ = Math.random() * Math.PI * 2; const ets = [];
+      for (const ph of [phiJ, phiJ + Math.PI + RNG.gauss() * 0.1]) {
+        const et = 60 + RNG.exp(80); ets.push(et);
+        const n = 8 + RNG.poisson(6);
+        for (let i = 0; i < n; i++) hadron(1.5 + RNG.exp(et * 0.06), ph + RNG.gauss() * 0.08, Math.random() < 0.5 ? 1 : -1, 0.9);
+        towers.push({ phi: ph, dphi: 0.22, r0: 1.29, r1: 1.75, color: '87,255,154', a: 0.45 });
+        towers.push({ phi: ph, dphi: 0.26, r0: 1.8, r1: 1.8 + Math.min(1.15, 0.22 * Math.log(et)), color: '255,200,90', a: 0.8 });
+      }
+      summary = `dijet, E_T ≈ ${ets.map(e => e.toFixed(0)).join(' + ')} GeV`;
+    } else if (type === 'golden') {
+      const flavours = [['μ', 'μ', 'μ', 'μ'], ['e', 'e', 'μ', 'μ'], ['e', 'e', 'e', 'e']][Math.floor(Math.random() * 3)];
+      const charges = [1, -1, 1, -1];
+      flavours.forEach((fl, i) => {
+        const pt = 15 + RNG.exp(25), phi = Math.random() * Math.PI * 2;
+        if (fl === 'μ') {
+          const t = propagate(pt, phi, charges[i], 7.3);
+          tracks.push({ pts: t.pts, color: '#ff5a7a', w: 2, a: 1, glow: true });
+        } else {
+          const t = propagate(pt, phi, charges[i], 1.29);
+          tracks.push({ pts: t.pts, color: '#57ff9a', w: 2, a: 1, glow: true });
+          towers.push({ phi: Math.atan2(t.end[1], t.end[0]), dphi: 0.06, r0: 1.29, r1: 1.29 + Math.min(0.46, 0.012 * pt), color: '87,255,154', a: 0.95 });
+        }
+      });
+      const nm = flavours.filter(f => f === 'μ').length;
+      summary = `multi-lepton candidate: ${nm ? nm + 'μ' : ''}${nm < 4 ? (4 - nm) + 'e' : ''}`;
+    } else summary = 'minimum bias';
+    // vertices along z: Poisson(μ) pile-up spread over the luminous region
+    const nPU = Math.min(400, RNG.poisson(d.mu));
+    const sig = d.lumRegion;
+    const verts = []; for (let i = 0; i < nPU; i++) verts.push(RNG.gauss() * sig);
+    return { born: performance.now() / 1000, type, tracks, towers, verts, pv: RNG.gauss() * sig, sig, nTrk: tracks.length, nPU, summary, number: Math.floor(d.eventsTotal) };
+  }
+
+  function update(dt, d) {
+    if (d.colliding) {
+      const want = d.R * K_DISPLAY;
+      shownRate = Math.min(want, CAP);
+      sampling = shownRate > 0 ? d.R / shownRate : Infinity;
+      acc += shownRate * dt;
+      while (acc >= 1) { acc -= 1; events.push(makeEvent(d)); if (events.length > 6) events.shift(); }
+    } else { shownRate = 0; acc = 0; }
+  }
+
+  function draw(d) {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.drawImage(bg.c, 0, 0, W, H);
+    const now = performance.now() / 1000;
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    events.forEach((ev, idx) => {
+      const latest = idx === events.length - 1;
+      const age = now - ev.born;
+      const a = latest ? Math.max(0.65, 1 - age / 1.6) : Math.max(0, 0.6 - age / 1.6);
+      if (a <= 0) return;
+      for (const t of ev.towers) {
+        ctx.fillStyle = `rgba(${t.color},${t.a * a})`;
+        const r0 = mapR(t.r0) * geo.R, r1 = mapR(t.r1) * geo.R;
+        ctx.beginPath(); ctx.arc(geo.cx, geo.cy, r1, -t.phi - t.dphi / 2, -t.phi + t.dphi / 2); ctx.arc(geo.cx, geo.cy, r0, -t.phi + t.dphi / 2, -t.phi - t.dphi / 2, true); ctx.closePath(); ctx.fill();
+      }
+      for (const t of ev.tracks) {
+        ctx.strokeStyle = t.color; ctx.globalAlpha = t.a * a; ctx.lineWidth = t.w;
+        if (t.glow) { ctx.shadowColor = t.color; ctx.shadowBlur = 8; } else ctx.shadowBlur = 0;
+        ctx.beginPath(); t.pts.forEach((p, i) => { const [x, y] = toPx(p[0], p[1]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.stroke();
+      }
+      ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+      if (latest) {
+        const x0 = 14, x1 = W - 14, y = geo.stripY + geo.stripH / 2, zx = z => x0 + (Math.max(-0.2, Math.min(0.2, z)) + 0.2) / 0.4 * (x1 - x0);
+        const g = ctx.createLinearGradient(zx(-2 * ev.sig), 0, zx(2 * ev.sig), 0);
+        g.addColorStop(0, 'rgba(164,107,255,0)'); g.addColorStop(0.5, `rgba(164,107,255,${0.35 * a})`); g.addColorStop(1, 'rgba(164,107,255,0)');
+        ctx.fillStyle = g; ctx.fillRect(zx(-2 * ev.sig), y - 9, zx(2 * ev.sig) - zx(-2 * ev.sig), 18);
+        ctx.fillStyle = `rgba(190,210,255,${0.75 * a})`;
+        for (const z of ev.verts) ctx.fillRect(zx(z) - 0.5, y - 5, 1.2, 10);
+        const pc = ev.type === 'golden' ? '#ff5a7a' : ev.type === 'dijet' ? '#ffc85a' : '#ffffff';
+        ctx.fillStyle = pc; ctx.beginPath(); ctx.arc(zx(ev.pv), y, 3.5, 0, Math.PI * 2); ctx.fill();
+      }
+    });
+    ctx.restore();
+    if (!events.length) {
+      ctx.fillStyle = 'rgba(130,150,200,0.75)'; ctx.font = '11px ui-monospace,"SF Mono",Menlo,Consolas,monospace'; ctx.textAlign = 'center';
+      ctx.fillText('no collisions', geo.cx, geo.cy + 4); ctx.textAlign = 'left';
+    }
+    if (now - lastMetaUpdate > 0.25) {
+      lastMetaUpdate = now;
+      rateEl.textContent = d.colliding ? `${shownRate.toFixed(1)} shown/s` : '';
+      const ev = events[events.length - 1];
+      if (ev) {
+        metaEl.innerHTML =
+          `Event ${ev.number.toLocaleString('en-US')}: ${ev.summary}<br>` +
+          `${ev.nTrk} tracks drawn, ${ev.nPU} pile-up vertices, σ_lum ${(ev.sig * 100).toFixed(1)} cm<br>` +
+          (d.colliding
+            ? `<span class="dim">Showing 1 in ${Fmt.sci(sampling, 1)} of R = ${Fmt.sci(d.R, 2)} s⁻¹. Event mix enriched for display: ${MIX.dijet * 100}% dijet, ${MIX.golden * 100}% multi-lepton.</span>`
+            : `<span class="dim">Collisions stopped. Last event shown.</span>`);
+      }
+    }
+  }
+  return { layout, update, draw };
+})();
+
+/* =====================================================================
+   UI MODULE: sliders, buttons, readouts, banners, log
+   ===================================================================== */
+const UI = (() => {
+  const P = Physics, K = Physics.K, M = Machine;
+  const NOMINAL = { E: 7, B: 8.33, N: 1.15, nb: 2808, eps: 3.75, beta: 55, theta: 285 };
+  const S = Object.assign({}, NOMINAL, { speed: 300 });
+  const $ = id => document.getElementById(id);
+
+  const SLIDERS = [
+    { key: 'E', label: 'Beam energy per beam', min: 0.45, max: 7, step: 0.01, unit: 'TeV', fmt: v => v.toFixed(2) },
+    { key: 'B', label: 'Dipole field', min: 0, max: 9, step: 0.01, unit: 'T', fmt: v => v.toFixed(2) },
+    { key: 'N', label: 'Bunch intensity', min: 0.1, max: 2.2, step: 0.01, unit: '×10¹¹ p', fmt: v => v.toFixed(2) },
+    { key: 'nb', label: 'Number of bunches', min: 1, max: 2808, log: true, unit: '', fmt: v => String(v) },
+    { key: 'eps', label: 'Normalized emittance', min: 1, max: 10, step: 0.05, unit: 'µm·rad', fmt: v => v.toFixed(2) },
+    { key: 'beta', label: 'β* at the IP', min: 25, max: 200, step: 1, unit: 'cm', fmt: v => v.toFixed(0) },
+    { key: 'theta', label: 'Crossing angle', min: 0, max: 500, step: 5, unit: 'µrad', fmt: v => v.toFixed(0) },
+    { key: 'speed', label: 'Simulation speed', min: 1, max: 3600, log: true, unit: '×', fmt: v => String(v) },
+  ];
+  const logPos = (cfg, v) => Math.round(1000 * Math.log(v / cfg.min) / Math.log(cfg.max / cfg.min));
+  const logVal = (cfg, t) => Math.round(cfg.min * Math.pow(cfg.max / cfg.min, t / 1000));
+
+  function buildSliders() {
+    const host = $('sliders');
+    host.innerHTML = SLIDERS.map(c => `
+      <div class="ctl" data-key="${c.key}">
+        <div class="ctl-top"><label for="s-${c.key}">${c.label}</label><output id="o-${c.key}"></output></div>
+        <input type="range" id="s-${c.key}" ${c.log ? 'min="0" max="1000" step="1"' : `min="${c.min}" max="${c.max}" step="${c.step}"`}>
+        <div class="ctl-note" id="n-${c.key}"></div>
+      </div>`).join('');
+    for (const c of SLIDERS) {
+      const el = $('s-' + c.key);
+      el.addEventListener('input', () => { S[c.key] = c.log ? logVal(c, +el.value) : +el.value; syncSlider(c); });
+    }
+    syncAll();
+  }
+  function syncSlider(c) {
+    const el = $('s-' + c.key);
+    if (c.log) el.value = logPos(c, S[c.key]); else el.value = S[c.key];
+    const pct = (el.value - el.min) / (el.max - el.min) * 100;
+    el.style.setProperty('--p', pct + '%');
+    $('o-' + c.key).innerHTML = `${c.fmt(S[c.key])}<span>${c.unit}</span>`;
+  }
+  const syncAll = () => SLIDERS.forEach(syncSlider);
+
+  const TILES = [
+    ['E', 'Beam energy'], ['B', 'Dipole field'], ['R', 'Event rate'], ['mu', 'Pile-up per crossing'],
+    ['int', 'Integrated luminosity'], ['I', 'Beam current'], ['Est', 'Stored energy per beam'], ['SR', 'Synchrotron power per beam'],
+    ['tau', 'Beam lifetime'], ['opt', 'Optics at IP1 and IP5'], ['q', 'Quench margin'], ['fill', 'Fill duration'],
+  ];
+  function buildTiles() {
+    $('tiles').innerHTML = TILES.map(([id, label]) => `<div class="tile" id="t-${id}"><small>${label}</small><output id="tv-${id}">—</output><p id="ts-${id}"></p></div>`).join('');
+  }
+  function tile(id, value, sub, tone) {
+    $('tv-' + id).textContent = value; $('ts-' + id).textContent = sub || '';
+    $('t-' + id).className = 'tile' + (tone ? ' ' + tone : '');
+  }
+
+  // Banner
+  let bannerTimer = 0, bannerSticky = null;
+  function banner(kind, title, text, dur) {
+    const b = $('banner'); b.hidden = false; b.dataset.kind = kind;
+    $('bannerTitle').textContent = title; $('bannerText').textContent = text;
+    bannerTimer = dur || 0;
+  }
+  function hideBanner() { $('banner').hidden = true; bannerTimer = 0; }
+
+  // Log
+  function log(level, text, t) {
+    const li = document.createElement('li'); li.className = level;
+    li.innerHTML = `<time>${Fmt.clock(t)}</time><span></span>`; li.lastChild.textContent = text;
+    const ol = $('log'); ol.prepend(li);
+    while (ol.children.length > 40) ol.lastChild.remove();
+  }
+
+  function notify(n) {
+    if (n.type === 'log') log(n.level, n.text, n.t);
+    else if (n.type === 'banner') banner(n.kind, n.title, n.text, n.dur);
+    else if (n.type === 'quench') bannerSticky = 'quench';
+  }
+
+  // Buttons
+  const ACTS = ['inject', 'ramp', 'squeeze', 'collide', 'dump'];
+  const ORDER = { NOBEAM: 0, INJECTING: 1, INJECTED: 1, RAMPING: 2, FLATTOP: 2, SQUEEZING: 3, ADJUST: 3, STABLE: 4 };
+  const ACTIVE = { INJECTING: 'inject', RAMPING: 'ramp', SQUEEZING: 'squeeze', STABLE: 'collide' };
+  let hintOverride = null, hintOverrideT = 0;
+  function press(act) {
+    const r = M.act(act, S);
+    if (!r.ok) { hintOverride = { text: r.why, cls: 'bad' }; hintOverrideT = 3.5; }
+    else hintOverride = null;
+  }
+  function wireButtons() {
+    document.querySelectorAll('.step').forEach(b => b.addEventListener('click', () => press(b.dataset.act)));
+    $('presetNominal').addEventListener('click', () => { Object.assign(S, NOMINAL); syncAll(); });
+    window.addEventListener('keydown', e => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const map = { i: 'inject', r: 'ramp', s: 'squeeze', c: 'collide', d: 'dump' };
+      const a = map[e.key.toLowerCase()]; if (a) { press(a); }
+    });
+  }
+  function updateButtons(d) {
+    const stage = ORDER[d.mode] ?? 0;
+    let nextSet = false;
+    ACTS.forEach((a, i) => {
+      const b = document.querySelector(`.step[data-act="${a}"]`);
+      const c = M.can(a, S);
+      b.setAttribute('aria-disabled', c.ok ? 'false' : 'true');
+      b.title = c.ok ? '' : c.why;
+      b.classList.toggle('active', ACTIVE[d.mode] === a);
+      b.classList.toggle('done', a !== 'dump' && d.beam && i < stage && ACTIVE[d.mode] !== a && !(a === 'ramp' && d.mode === 'FLATTOP' && c.ok));
+      const isNext = a !== 'dump' && c.ok && !nextSet;
+      if (isNext) nextSet = true;
+      b.classList.toggle('next', isNext);
+      if (a === 'dump') b.classList.toggle('urge', d.mode === 'STABLE' && d.survival < 0.1);
+    });
+  }
+  function hintFor(d) {
+    const f2 = v => v.toFixed(2);
+    switch (d.mode) {
+      case 'NOBEAM': return S.B < d.Binj ? { text: `Raise the dipole field to at least ${f2(d.Binj)} T, then inject.`, cls: 'warn' }
+        : { text: `Inject a 450 GeV fill of ${S.nb} bunches per beam to begin. Injection takes ${Fmt.clock(P.injectionTime_s(S.nb))} of sim time.` };
+      case 'INJECTING': return { text: `Injecting: ${d.nb} of ${S.nb} bunches per beam.` };
+      case 'INJECTED': return d.BreqSet > S.B + 1e-9
+        ? { text: `${f2(S.E)} TeV needs ${f2(d.BreqSet)} T but the dipoles are capped at ${f2(S.B)} T. This ramp will lose the beam.`, cls: 'warn' }
+        : { text: `Ramp to ${f2(S.E)} TeV. The dipoles must track the energy up to ${f2(d.BreqSet)} T.` };
+      case 'RAMPING': return { text: `Ramping: ${(d.E / 1000).toFixed(3)} TeV, dipoles at ${d.B.toFixed(3)} T.` };
+      case 'FLATTOP': return { text: `Flat top at ${(d.E / 1000).toFixed(2)} TeV. Squeeze β* from 11 m to ${S.beta} cm.` };
+      case 'SQUEEZING': return { text: `Squeezing: β* = ${(d.beta * 100).toFixed(0)} cm.` };
+      case 'ADJUST': return { text: 'Optics squeezed. Declare stable beams to bring the beams into collision.' };
+      case 'STABLE': return d.survival < 0.1
+        ? { text: `Intensity is ${(d.survival * 100).toFixed(1)}% of injected. Dump and refill.`, cls: 'warn' }
+        : { text: 'Stable beams. Move β*, crossing angle, intensity or emittance and watch luminosity respond.' };
+      case 'DUMPING': case 'RAMPDOWN': return { text: `Magnets ramping down to injection field (${d.B.toFixed(2)} T).` };
+      case 'QUENCH': return { text: `Magnet quench. Cryogenic recovery: ${Math.ceil(d.quenchTimer)} s.`, cls: 'bad' };
+      case 'RECOVERY': return { text: `Re-energising magnets: ${d.B.toFixed(2)} T.` };
+    }
+    return { text: '' };
+  }
+
+  const MODE_NAME = { NOBEAM: ['No beam', 'idle'], INJECTING: ['Injection', 'busy'], INJECTED: ['Injection', 'busy'], RAMPING: ['Ramp', 'busy'],
+    FLATTOP: ['Flat top', 'busy'], SQUEEZING: ['Squeeze', 'busy'], ADJUST: ['Adjust', 'busy'], STABLE: ['Stable beams', 'ok'],
+    DUMPING: ['Beam dump', 'warn'], RAMPDOWN: ['Ramp down', 'warn'], QUENCH: ['Quench', 'alarm'], RECOVERY: ['Recovery', 'warn'] };
+
+  let acc = 0;
+  function update(d, dt) {
+    if (bannerTimer > 0) { bannerTimer -= dt; if (bannerTimer <= 0) hideBanner(); }
+    if (hintOverrideT > 0) { hintOverrideT -= dt; if (hintOverrideT <= 0) hintOverride = null; }
+    acc += dt; if (acc < 1 / 12) return; acc = 0;
+
+    // Sticky banners: quench cooldown, low intensity suggestion
+    if (d.mode === 'QUENCH') banner('quench', 'MAGNET QUENCH', `Dipoles quenched at ${d.quenchB.toFixed(2)} T. Field collapsing (${d.B.toFixed(2)} T). Cryogenic recovery ${Math.ceil(d.quenchTimer)} s before re-ramp.`, 0.3);
+    else if (d.mode === 'STABLE' && d.survival < 0.1 && bannerTimer <= 0.31) banner('warn', 'DUMP AND REFILL RECOMMENDED', `Beam current down to ${(d.survival * 100).toFixed(1)}% of injected (${d.I.toFixed(3)} A).`, 0.3);
+
+    // Header
+    const [name, tone] = MODE_NAME[d.mode];
+    $('hModeText').textContent = name; $('hMode').dataset.tone = tone;
+    $('hFill').textContent = d.fills;
+    $('hClock').textContent = Fmt.clock(d.simTime);
+    $('hEnergy').textContent = d.beam ? `${(d.E / 1000).toFixed(2)} TeV` : `${S.E.toFixed(2)} TeV set`;
+    const sq = $('hSqrtS'); sq.textContent = (d.beam ? d.sqrtS : d.sqrtSset).toFixed(2); sq.classList.toggle('dim', !d.beam);
+
+    // Luminosity hero
+    const lv = $('lumiValue');
+    if (d.colliding) {
+      lv.innerHTML = `${Fmt.sci(d.L, 2)}<span>cm⁻² s⁻¹</span>`; lv.classList.remove('dim');
+      $('lumiLabel').textContent = 'Luminosity at IP1 and IP5';
+      $('lumiSub').textContent = `F = ${d.F.toFixed(3)}, σ* = ${(d.sigmaStar * 1e6).toFixed(1)} µm, peak this fill ${Fmt.sci(d.peakL, 2)}`;
+    } else {
+      lv.innerHTML = `${Fmt.sci(d.projL, 2)}<span>cm⁻² s⁻¹</span>`; lv.classList.add('dim');
+      $('lumiLabel').textContent = 'Luminosity, projected at slider setpoints (no collisions)';
+      $('lumiSub').textContent = `F = ${d.projF.toFixed(3)}, σ* = ${(d.projSigmaStar * 1e6).toFixed(1)} µm at ${S.E.toFixed(2)} TeV, β* ${S.beta} cm`;
+    }
+
+    // Tiles
+    tile('E', d.beam ? `${(d.E / 1000).toFixed(3)} TeV` : `${S.E.toFixed(2)} TeV set`, `γ = ${P.gamma(d.beam ? d.E : d.Eset).toFixed(0)}, √s = ${(d.beam ? d.sqrtS : d.sqrtSset).toFixed(2)} TeV`);
+    tile('B', `${d.B.toFixed(3)} T`, `beam needs ${d.BreqBeam.toFixed(3)} T`, d.mode === 'QUENCH' ? 'bad' : d.B > K.B_DESIGN_T ? 'warn' : '');
+    tile('R', d.colliding ? `${Fmt.sci(d.R, 2)} s⁻¹` : `${Fmt.sci(d.projR, 2)} s⁻¹`, `σ_inel = ${d.sigmaInel.toFixed(1)} mb${d.colliding ? '' : ', projected'}`, d.colliding ? 'ok' : '');
+    tile('mu', d.colliding ? d.mu.toFixed(1) : d.projMu.toFixed(1), d.colliding ? `${(d.nb * K.F_REV_HZ / 1e6).toFixed(1)} M crossings/s` : 'projected');
+    tile('int', Fmt.intLumi(d.intLumiFill), `session ${Fmt.intLumi(d.intLumiTotal)}`, d.colliding ? 'ok' : '');
+    tile('I', d.beam ? (d.I >= 0.1 ? `${d.I.toFixed(3)} A` : `${(d.I * 1e3).toFixed(2)} mA`) : '0 A',
+      d.beam ? `${(d.survival * 100).toFixed(1)}% of injected` : `full fill ${d.Iset.toFixed(3)} A`, d.beam && d.survival < 0.1 ? 'warn' : '');
+    tile('Est', d.beam ? `${(d.Estored / 1e6).toFixed(1)} MJ` : '0 MJ', d.beam ? 'per beam, N n_b E e' : `at setpoints ${(d.EstoredSet / 1e6).toFixed(0)} MJ`);
+    tile('SR', d.beam ? Fmt.si(d.Psr, 'W') : '0 W', `U₀ ${d.U0.toFixed(3)} keV/turn${d.beam ? '' : `, setpoints ${Fmt.si(d.PsrSet, 'W')}`}`);
+    tile('tau', d.colliding ? Fmt.hours(d.tau) : d.beam ? '100 h' : '—', d.colliding ? `burn-off ${Fmt.hours(d.tauBurn)}, gas 100` : d.beam ? 'gas scattering only' : 'no beam');
+    tile('opt', `β* ${(d.beta * 100).toFixed(0)} cm`, d.mode === 'STABLE' || d.mode === 'ADJUST' ? `θ_c ${S.theta} µrad, F ${d.F.toFixed(3)}` : (d.beam ? 'injection optics, 11 m' : `target ${S.beta} cm`));
+    const riskMin = 1 - Math.exp(-d.quenchRisk * 60);
+    tile('q', d.mode === 'QUENCH' ? 'Quenched' : `${(K.B_QUENCH_T - d.B).toFixed(2)} T`,
+      d.mode === 'QUENCH' ? `recovery ${Math.ceil(d.quenchTimer)} s` : d.quenchRisk > 0 ? `quench risk ${(riskMin * 100).toFixed(0)}% per min` : 'at or below design field',
+      d.mode === 'QUENCH' ? 'bad' : d.quenchRisk > 0 ? 'warn' : '');
+    tile('fill', d.beam ? Fmt.clock(d.fillTime) : '—', `sim speed ${S.speed}×`);
+
+    // Slider notes
+    const note = (k, text, cls) => { const el = $('n-' + k); el.textContent = text; el.className = 'ctl-note' + (cls ? ' ' + cls : ''); };
+    const lockedE = d.beam && ['ADJUST', 'STABLE', 'SQUEEZING'].includes(d.mode);
+    note('E', d.BreqSet > S.B + 1e-9 ? `needs ${d.BreqSet.toFixed(2)} T, field set to ${S.B.toFixed(2)}` : lockedE ? `beam at ${(d.E / 1000).toFixed(2)} TeV, fixed this fill` : `needs ${d.BreqSet.toFixed(2)} T dipoles`,
+      d.BreqSet > S.B + 1e-9 ? 'bad' : '');
+    note('B', S.B >= K.B_QUENCH_T ? 'at 9 T the dipoles quench' : S.B > K.B_DESIGN_T ? `above 8.33 T design: quench risk` : `holds up to ${(d.EmaxForB / 1000).toFixed(2)} TeV`,
+      S.B >= K.B_QUENCH_T ? 'bad' : S.B > K.B_DESIGN_T ? 'warn' : '');
+    document.querySelector('.ctl[data-key="B"]').classList.toggle('hot', S.B > K.B_DESIGN_T);
+    note('N', d.beam ? `live ${(d.N / 1e11).toFixed(3)} ×10¹¹, L ∝ N²` : 'L ∝ N²');
+    note('nb', `injection ${Fmt.clock(P.injectionTime_s(S.nb))}, ${Math.ceil(S.nb / K.BUNCHES_PER_TRANSFER)} transfers per ring`);
+    note('eps', `σ* ${((d.beam ? d.sigmaStar : d.projSigmaStar) * 1e6).toFixed(1)} µm`);
+    note('beta', d.mode === 'ADJUST' || d.mode === 'STABLE' ? 'live: L ∝ F/β*' : d.mode === 'SQUEEZING' ? `squeezing, now ${(d.beta * 100).toFixed(0)} cm` : 'squeeze target', d.mode === 'STABLE' ? 'ok' : '');
+    note('theta', `F = ${(d.beam ? d.F : d.projF).toFixed(3)}, Piwinski ${(d.beam ? d.piwinski : 0).toFixed(2)}`);
+    note('speed', `1 s real = ${S.speed >= 60 ? (S.speed / 60).toFixed(S.speed >= 600 ? 0 : 1) + ' min' : S.speed + ' s'} sim`);
+
+    updateButtons(d);
+    const h = hintOverride || hintFor(d);
+    const he = $('hint'); he.textContent = h.text; he.className = 'hint' + (h.cls ? ' ' + h.cls : '');
+  }
+
+  function buildReference() {
+    $('refBody').innerHTML = [
+      `<p><b>Rigidity.</b> <code>p[GeV/c] = 0.2998 · B[T] · ρ</code> with ρ = ${K.RHO_M} m. Holding energy E needs <code>B = p/(0.2998 ρ)</code>: ${P.requiredField(7000).toFixed(3)} T at 7 TeV, ${P.requiredField(450).toFixed(3)} T at 450 GeV. During the ramp the energy tracks the dipoles at ${K.DBDT_T_PER_S} T/s.</p>`,
+      `<p><b>Luminosity.</b> <code>L = N² n_b f_rev γ / (4π ε_n β*) · F</code>, <code>F = 1/√(1 + (θ_c σ_z / 2σ*)²)</code>, <code>σ* = √(ε_n β*/γ)</code>, σ_z = 7.5 cm, f_rev = ${K.F_REV_HZ} Hz, γ = E/m_p.</p>`,
+      `<p><b>Events.</b> <code>R = L σ_inel</code>, σ_inel = 80 mb · (1 + 0.12 ln(√s/14 TeV)). Pile-up <code>μ = R/(n_b f_rev)</code>. Integrated luminosity is ∫L dt over stable beams, in fb⁻¹ (10³⁹ cm⁻²).</p>`,
+      `<p><b>Synchrotron radiation.</b> <code>U₀[keV] = 88.5 E⁴ / ρ / 1836⁴</code>, <code>P = U₀ · I</code>, <code>I = N n_b e f_rev</code>. Stored energy per beam <code>N n_b E e</code>.</p>`,
+      `<p><b>Lifetime.</b> <code>dN_tot/dt = −k L σ_tot − N_tot/τ_gas</code> with k = 2 high-luminosity IPs, σ_tot = 110 mb at 14 TeV (same √s scaling), τ_gas = 100 h. Burn-off lifetime <code>τ = N_tot/(k L σ_tot)</code>.</p>`,
+      `<p><b>Magnets.</b> Above 8.33 T a training-quench hazard grows as ((B − 8.33)/0.67)², up to ${K.QUENCH_HAZARD_MAX_PER_S}/s near 9 T; at 9 T the dipoles always quench. Cryogenic recovery is compressed to ${K.QUENCH_RECOVERY_S} real seconds.</p>`,
+      `<p><b>Operations.</b> Injection: ⌈n_b/288⌉ SPS transfers per ring, ${K.SPS_CYCLE_S} s each. Squeeze: β* from 11 m, ln β* falls at ${(K.SQUEEZE_LN_RATE * 3600).toFixed(1)} per hour (11 m to 55 cm in 15 min). 25 ns filling scheme with trains of 72 and a 119-slot abort gap.</p>`,
+      `<p><b>Display only.</b> Bunch motion, flash rate (6 per s per 10³⁴, weighted 1/1/0.25/0.08 for IP1/5/8/2) and the event sampling factor are visual scalings. The event display draws a toy generator in a CMS-like 3.8 T geometry with a display-enriched event mix; its track count follows dN/dη ∝ s^0.103 and its pile-up follows μ.</p>`,
+    ].join('');
+  }
+
+  function init() { buildSliders(); buildTiles(); wireButtons(); buildReference(); log('info', 'Machine at injection field. Ready to inject.', 0); }
+  return { S, init, update, notify };
+})();
+
+/* =====================================================================
+   MAIN LOOP
+   ===================================================================== */
+(() => {
+  UI.init();
+  const relayout = () => { RingView.layout(); Scope.layout(); EventDisplay.layout(); };
+  relayout();
+  let rt = 0;
+  window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(relayout, 120); });
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.1, Math.max(0, (now - last) / 1000)); last = now;
+    const S = UI.S;
+    Machine.step(dt, S);
+    for (const n of Machine.drain()) { UI.notify(n); RingView.notify(n); }
+    const d = Machine.derive(S);
+    RingView.draw(dt, d, S);
+    Scope.update(dt, d); Scope.draw(d);
+    EventDisplay.update(dt, d); EventDisplay.draw(d);
+    UI.update(d, dt);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

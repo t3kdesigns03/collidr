@@ -1,0 +1,12 @@
+{
+  "name": "collidr",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Single-file interactive hadron collider simulator (LHC scale). No build step, no dependencies.",
+  "type": "module",
+  "scripts": {
+    "test": "node tests/acceptance.mjs",
+    "start": "npx --yes serve public"
+  },
+  "engines": { "node": ">=18" }
+}
